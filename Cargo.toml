@@ -1,0 +1,24 @@
+[package]
+name = "ffbuildtool"
+version = "0.1.0"
+authors = ["Gent Semaj"]
+edition = "2021"
+
+[dependencies]
+log = "0.4.22"
+reqwest = "0.12.9"
+rust-lzma = "0.6.0"
+serde = { version = "1.0.214", features = ["derive"] }
+serde_json = "1.0.132"
+sha2 = "0.10.8"
+tokio = { version = "1.41.1", features = ["full"] }
+uuid = { version = "1.11.0", features = ["v4", "serde"] }
+
+[lib]
+name = "ffbuildtool"
+
+[[example]]
+name = "gen_manifest"
+
+[dev-dependencies]
+env_logger = { version = "0.11.5", features = ["color"] }
