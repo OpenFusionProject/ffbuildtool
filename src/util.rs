@@ -92,3 +92,15 @@ pub fn decompress(data: &[u8]) -> Result<Vec<u8>, Error> {
         Err(e) => Err(e.to_string().into()),
     }
 }
+
+pub fn url_encode(input: &str) -> String {
+    let mut output = String::new();
+    for byte in input.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            output.push(byte as char);
+        } else {
+            output.push_str(&format!("_{:02X}", byte));
+        }
+    }
+    output
+}

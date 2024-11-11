@@ -105,6 +105,50 @@ impl Version {
         info!("Validation complete; {} corrupted bundles", corrupted.len());
         Ok(corrupted)
     }
+
+    pub async fn validate_uncompressed(&self, path: &str) -> Result<Vec<String>, Error> {
+        info!(
+            "Validating uncompressed asset bundles for {} ({})...",
+            self.uuid, path
+        );
+        let bundles = self.asset_info.bundles.clone();
+        let corrupted = Arc::new(Mutex::new(Vec::new()));
+        let mut tasks = Vec::with_capacity(bundles.len());
+        for (bundle_name, bundle_info) in bundles {
+            let corrupted = Arc::clone(&corrupted);
+            let bundle_name_url_encoded = util::url_encode(&bundle_name);
+            let file_path = PathBuf::from(path).join(&bundle_name_url_encoded);
+            tasks.push(tokio::spawn(async move {
+                for (file_name, file_info_good) in bundle_info.uncompressed_info {
+                    let file_id: String = format!("{}/{}", bundle_name, file_name);
+                    let file_path = file_path.join(&file_name);
+                    match FileInfo::build_file(file_path.to_str().unwrap()) {
+                        Ok(file_info) => {
+                            if file_info != file_info_good {
+                                warn!(
+                                    "File info mismatch for {} (uncompressed): {:?} vs {:?}",
+                                    file_id, file_info, file_info
+                                );
+                                corrupted.lock().unwrap().push(file_id);
+                            }
+                        }
+                        Err(_) => {
+                            warn!("Bad/missing file for {}", file_id);
+                            corrupted.lock().unwrap().push(file_id);
+                        }
+                    }
+                }
+            }));
+        }
+
+        for task in tasks {
+            task.await?;
+        }
+
+        let corrupted = Arc::try_unwrap(corrupted).unwrap().into_inner().unwrap();
+        info!("Validation complete; {} corrupted files", corrupted.len());
+        Ok(corrupted)
+    }
 }
 
 /// Contains the info for each asset bundle in the build.

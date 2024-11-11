@@ -23,5 +23,8 @@ name = "gen_manifest"
 [[example]]
 name = "validate_compressed"
 
+[[example]]
+name = "validate_uncompressed"
+
 [dev-dependencies]
 env_logger = { version = "0.11.5", features = ["color"] }
