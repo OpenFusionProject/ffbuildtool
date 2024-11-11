@@ -86,6 +86,7 @@ pub fn read_stringz<T: BufRead>(reader: &mut T) -> Result<String, Error> {
     Ok(string)
 }
 
+#[cfg(feature = "lzma")]
 pub fn decompress(data: &[u8]) -> Result<Vec<u8>, Error> {
     match lzma::decompress(data) {
         Ok(decompressed) => Ok(decompressed),

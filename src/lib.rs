@@ -224,7 +224,12 @@ impl BundleInfo {
             );
         }
 
+        #[cfg(feature = "lzma")]
         let uncompressed_info = bundle.get_uncompressed_info().await?;
+
+        #[cfg(not(feature = "lzma"))]
+        let uncompressed_info = HashMap::new();
+
         Ok(Self {
             compressed_info,
             uncompressed_info,
@@ -262,6 +267,7 @@ impl FileInfo {
         Ok(Self { hash, size })
     }
 
+    #[cfg(feature = "lzma")]
     fn build_buffer(buffer: &[u8]) -> Self {
         let hash = util::get_buffer_hash(buffer);
         let size = buffer.len() as u64;

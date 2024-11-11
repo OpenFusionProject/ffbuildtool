@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+#[cfg(feature = "lzma")]
 use std::{
     collections::HashMap,
     io::{Read as _, Seek as _},
@@ -7,7 +8,10 @@ use std::{
 
 use log::*;
 
-use crate::{util, Error, FileInfo};
+use crate::{util, Error};
+
+#[cfg(feature = "lzma")]
+use crate::FileInfo;
 
 #[derive(Debug)]
 pub struct AssetBundle {
@@ -110,6 +114,7 @@ impl AssetBundle {
         })
     }
 
+    #[cfg(feature = "lzma")]
     pub async fn get_uncompressed_info(&self) -> Result<HashMap<String, FileInfo>, Error> {
         let files = self.get_file_entries()?;
         let result = files
@@ -119,6 +124,7 @@ impl AssetBundle {
         Ok(result)
     }
 
+    #[cfg(feature = "lzma")]
     fn get_file_entries(&self) -> Result<Vec<BundleFile>, Error> {
         let mut file = std::fs::File::open(&self.path)?;
         let mut reader = std::io::BufReader::new(&mut file);
