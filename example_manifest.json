@@ -1,0 +1,73 @@
+{
+  "uuid": "4cc94e66-c226-4b8b-ab48-3b4cf1929a18",
+  "description": "example-build",
+  "parent_uuid": null,
+  "main_file_url": "http://example.url/builds/example_build/main.unity3d",
+  "main_file_info": {
+    "hash": "f7de09c1e891d8f796294448b1aa15eef22d7e8d204c3142f759e73be1e37798",
+    "size": 45
+  },
+  "asset_info": {
+    "asset_url": "http://example.url/builds/example_build/",
+    "total_compressed_size": 54541,
+    "total_uncompressed_size": 2610191,
+    "bundles": {
+      "Map_00_00.unity3d": {
+        "compressed_info": {
+          "hash": "2cfcb216ac81979e295165e39773b32bf0e4b364d1673ac5a9400f028e713a82",
+          "size": 3268
+        },
+        "uncompressed_info": {
+          "BuildPlayer-Map_00_00": {
+            "hash": "f18eeb5dd597551dfe14f46b192c3bc43019f8f20c060796da70422d8bdbd1f9",
+            "size": 37181
+          },
+          "BuildPlayer-Map_00_00.sharedAssets": {
+            "hash": "723e1c25fdfd7d4d1de47e828ac3ae2253905c6c3d7de8f27621043cecf26e62",
+            "size": 750
+          }
+        }
+      },
+      "Map_01_03.unity3d": {
+        "compressed_info": {
+          "hash": "fc5d2913e45e80fa00045b7a34e3b09da7953db2c439910f3166ecb9d5c1a22c",
+          "size": 17320
+        },
+        "uncompressed_info": {
+          "BuildPlayer-Map_01_03": {
+            "hash": "93fd9f29cc61ef7f110a7a540a04403eee6053e43559f3ec86d964950b16bf8e",
+            "size": 120732
+          },
+          "BuildPlayer-Map_01_03.sharedAssets": {
+            "hash": "cc06e18dc0ac31a7a83e603f00985d79df406a092c8923128d89fa498102f269",
+            "size": 990
+          }
+        }
+      },
+      "DongResources_00_09.resourceFile": {
+        "compressed_info": {
+          "hash": "9bb9b1df6d78785ebcbc955f2f0cf990643a4c86c98ea992aca0bd1e413a44b7",
+          "size": 8379
+        },
+        "uncompressed_info": {
+          "CustomAssetBundle-52625066c401043eda0a3d5088cda126": {
+            "hash": "a416331a870c05f143b57706cdc16151377697457fcc5b3ded0467643524107e",
+            "size": 1224913
+          }
+        }
+      },
+      "DongResources_03_01.resourceFile": {
+        "compressed_info": {
+          "hash": "7c8f7b6c653abe65a145796a4b9bcf83ebd46918ee184a30aaf7481ade2515e2",
+          "size": 25574
+        },
+        "uncompressed_info": {
+          "CustomAssetBundle-081f9133ea588475d988f9d46b6cdbb6": {
+            "hash": "a765a70db3dc825778e39e59f9e5b32c5aae6f0fdf43989fcfb1059b8d3f0dfc",
+            "size": 1225625
+          }
+        }
+      }
+    }
+  }
+}

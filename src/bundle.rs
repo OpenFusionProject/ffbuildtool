@@ -87,8 +87,8 @@ impl AssetBundle {
             let size = util::read_u32(&mut reader)?;
             if size != file_size1 {
                 warn!(
-                    "File size 2 ({}) does not match file size 1 ({})",
-                    size, file_size1
+                    "File size 2 ({}) does not match file size 1 ({}) for {}",
+                    size, file_size1, path
                 );
             }
             Some(size)

@@ -20,5 +20,8 @@ name = "ffbuildtool"
 [[example]]
 name = "gen_manifest"
 
+[[example]]
+name = "validate_compressed"
+
 [dev-dependencies]
 env_logger = { version = "0.11.5", features = ["color"] }

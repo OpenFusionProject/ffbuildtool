@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -27,6 +28,7 @@ pub struct Version {
     asset_info: AssetInfo,
 }
 impl Version {
+    /// Generates `Version` metadata given a local build root (compressed asset bundles).
     pub async fn build(
         main_path: &str,
         main_url: &str,
@@ -47,10 +49,61 @@ impl Version {
         })
     }
 
+    pub fn from_manifest(path: &str) -> Result<Self, Error> {
+        let json = std::fs::read_to_string(path)?;
+        let version: Self = serde_json::from_str(&json)?;
+        Ok(version)
+    }
+
+    /// Exports the `Version` metadata to a JSON file to be served from an API server.
     pub fn export_manifest(&self, path: &str) -> Result<(), Error> {
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(path, json)?;
         Ok(())
+    }
+
+    /// Validates the compressed asset bundles against the metadata. Returns a list of corrupted bundles.
+    pub async fn validate_compressed(&self, path: &str) -> Result<Vec<String>, Error> {
+        info!(
+            "Validating compressed asset bundles for {} ({})...",
+            self.uuid, path
+        );
+        let bundles = self.asset_info.bundles.clone();
+        let corrupted = Arc::new(Mutex::new(Vec::new()));
+        let mut tasks = Vec::with_capacity(bundles.len());
+        for (bundle_name, bundle_info) in bundles {
+            let file_path = PathBuf::from(path)
+                .join(&bundle_name)
+                .to_str()
+                .unwrap()
+                .to_string();
+            let corrupted = Arc::clone(&corrupted);
+            tasks.push(tokio::spawn(async move {
+                match FileInfo::build_file(&file_path) {
+                    Ok(file_info) => {
+                        if file_info != bundle_info.compressed_info {
+                            warn!(
+                                "File info mismatch for {} (compressed): {:?} vs {:?}",
+                                bundle_name, file_info, bundle_info.compressed_info
+                            );
+                            corrupted.lock().unwrap().push(bundle_name.clone());
+                        }
+                    }
+                    Err(_) => {
+                        warn!("Bad/missing file for {}", bundle_name);
+                        corrupted.lock().unwrap().push(bundle_name.clone());
+                    }
+                }
+            }));
+        }
+
+        for task in tasks {
+            task.await?;
+        }
+
+        let corrupted = Arc::try_unwrap(corrupted).unwrap().into_inner().unwrap();
+        info!("Validation complete; {} corrupted bundles", corrupted.len());
+        Ok(corrupted)
     }
 }
 
@@ -107,7 +160,7 @@ impl AssetInfo {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct BundleInfo {
     compressed_info: FileInfo,
     uncompressed_info: HashMap<String, FileInfo>,
@@ -120,9 +173,10 @@ impl BundleInfo {
         let bundle = AssetBundle::from_file(&file_path)?;
         if bundle.get_file_size() != compressed_info.size {
             warn!(
-                "File size mismatch: {} (header) vs {} (actual)",
+                "File size mismatch: {} (header) vs {} (actual) for {}",
                 bundle.get_file_size(),
-                compressed_info.size
+                compressed_info.size,
+                bundle_name
             );
         }
 
@@ -138,7 +192,7 @@ impl BundleInfo {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct FileInfo {
     hash: String,
     size: u64,
@@ -171,7 +225,7 @@ impl FileInfo {
     }
 }
 
-pub fn get_bundle_names_from_asset_root(asset_root: &str) -> Result<Vec<String>, Error> {
+fn get_bundle_names_from_asset_root(asset_root: &str) -> Result<Vec<String>, Error> {
     let filtered = util::list_filenames_in_directory(asset_root)?
         .iter()
         .filter_map(|filename| {
