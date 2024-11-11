@@ -16,8 +16,11 @@ type Error = Box<dyn std::error::Error>;
 pub mod bundle;
 pub mod util;
 
+#[cfg(test)]
+mod tests;
+
 /// Contains all the info comprising a FusionFall build.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Version {
     uuid: Uuid,
     description: Option<String>,
@@ -152,7 +155,7 @@ impl Version {
 }
 
 /// Contains the info for each asset bundle in the build.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct AssetInfo {
     asset_url: String,
     total_compressed_size: u64,
@@ -204,7 +207,7 @@ impl AssetInfo {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 struct BundleInfo {
     compressed_info: FileInfo,
     uncompressed_info: HashMap<String, FileInfo>,
