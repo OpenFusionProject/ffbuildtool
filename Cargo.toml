@@ -36,5 +36,8 @@ name = "extract_bundle"
 [[example]]
 name = "download_build"
 
+[[example]]
+name = "repair_build"
+
 [dev-dependencies]
 env_logger = { version = "0.11.5", features = ["color"] }

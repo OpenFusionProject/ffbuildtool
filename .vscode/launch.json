@@ -129,8 +129,29 @@
             "args": [],
             "env": {
                 "RUST_LOG": "debug",
-                "RUST_LOG_STYLE": "always",
-                "RUST_BACKTRACE": "1"
+                "RUST_LOG_STYLE": "always"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'repair_build'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=repair_build",
+                    "--package=ffbuildtool"
+                ],
+                "filter": {
+                    "name": "repair_build",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "env": {
+                "RUST_LOG": "debug",
+                "RUST_LOG_STYLE": "always"
             },
             "cwd": "${workspaceFolder}"
         }

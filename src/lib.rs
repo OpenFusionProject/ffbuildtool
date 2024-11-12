@@ -57,6 +57,10 @@ impl Version {
         self.uuid
     }
 
+    pub fn set_asset_url(&mut self, asset_url: &str) {
+        self.asset_info.asset_url = asset_url.to_string();
+    }
+
     pub fn from_manifest(path: &str) -> Result<Self, Error> {
         let json = std::fs::read_to_string(path)?;
         let version: Self = serde_json::from_str(&json)?;
@@ -185,6 +189,45 @@ impl Version {
         self.validate_compressed(path.to_str().unwrap()).await?;
 
         Ok(())
+    }
+
+    pub async fn repair(&self, path: &str) -> Result<Vec<String>, Error> {
+        info!("Repairing build {} at {}", self.uuid, path);
+        let corrupted = self.validate_compressed(path).await?;
+        info!("{} corrupted bundles: {:?}", corrupted.len(), corrupted);
+
+        let mut tasks: Vec<JoinHandle<Result<(), String>>> = Vec::with_capacity(corrupted.len());
+        for bundle_name in corrupted.clone() {
+            let url = format!("{}/{}", self.asset_info.asset_url, bundle_name);
+            let bundle_info = self.get_bundle(&bundle_name).unwrap().clone();
+            let file_path = PathBuf::from(path)
+                .join(&bundle_name)
+                .to_str()
+                .unwrap()
+                .to_string();
+            tasks.push(tokio::spawn(async move {
+                if std::fs::exists(&file_path).is_ok_and(|exists| exists) {
+                    std::fs::remove_file(&file_path).map_err(|e| e.to_string())?;
+                }
+                util::download_to_file(&url, &file_path)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                bundle_info
+                    .validate_compressed(&file_path)
+                    .map_err(|e| e.to_string())?;
+                debug!("Repaired {}", bundle_name);
+                Ok(())
+            }));
+        }
+
+        for task in tasks {
+            if let Err(e) = task.await? {
+                return Err(e.into());
+            }
+        }
+
+        info!("Repair complete");
+        Ok(corrupted)
     }
 }
 

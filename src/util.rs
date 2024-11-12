@@ -150,8 +150,50 @@ pub fn url_encode(input: &str) -> String {
 }
 
 pub async fn download_to_file(url: &str, file_path: &str) -> Result<(), Error> {
+    // If the url is a file path, copy the file instead of downloading it
+    if url.starts_with("file:///") {
+        let path = url.trim_start_matches("file:///");
+        std::fs::copy(path, file_path)?;
+        return Ok(());
+    }
+
     let response = reqwest::get(url).await?;
     let mut file = std::fs::File::create(file_path)?;
     std::io::copy(&mut response.bytes().await?.as_ref(), &mut file)?;
     Ok(())
+}
+
+pub fn copy_dir(from: &str, to: &str, recursive: bool) -> Result<(), Error> {
+    let from = std::path::Path::new(from);
+    let to = std::path::Path::new(to);
+    if from.is_dir() {
+        if !from.exists() {
+            std::fs::create_dir_all(to)?;
+        }
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let path = entry.path();
+            let new_path = to.join(path.file_name().unwrap());
+            if path.is_dir() {
+                if recursive {
+                    copy_dir(&path.to_string_lossy(), &new_path.to_string_lossy(), true)?;
+                }
+            } else {
+                std::fs::copy(&path, &new_path)?;
+            }
+        }
+    } else {
+        std::fs::copy(from, to)?;
+    }
+    Ok(())
+}
+
+pub fn file_path_to_uri(file_path: &str) -> String {
+    let path = file_path.to_string();
+    // Replace backslashes with forward slashes
+    let path = path.replace("\\", "/");
+    // Remove prefixed //?/ if it exists
+    let path = path.trim_start_matches("//?/");
+    // Add file:/// protocol
+    format!("file:///{}", path)
 }

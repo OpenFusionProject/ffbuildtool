@@ -8,9 +8,9 @@ Current features:
 - Validate uncompressed asset bundles given a manifest
 - Extract compressed asset bundles
 - Download & validate all the compressed asset bundles given a manifest
+- Repair compressed asset bundles given a manifest
 
 TODO:
-- Repair compressed asset bundles given a manifest
 - CLI so you can do all this without writing code
 
 ## Building
@@ -22,6 +22,7 @@ cargo build
 By default, the crate requires liblzma to be installed on the system or it won't build. You can get around this with `--no-default-features` but this will cause uncompressed files to be missing from any created manifests.
 
 ## Running Unit Tests
+
 ```
 cargo test
 ```
