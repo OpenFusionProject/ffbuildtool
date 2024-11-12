@@ -172,14 +172,20 @@ impl Version {
 
     /// Downloads all compressed asset bundles and the main file for this build to the specified path.
     pub async fn download_compressed(&self, path: &str) -> Result<(), Error> {
-        info!("Downloading build {} to {}", self.uuid, path);
-        std::fs::create_dir_all(path)?;
-        let path = PathBuf::from(path);
+        let path = PathBuf::from(path).join(self.uuid.to_string());
+        info!(
+            "Downloading build {} to {}",
+            self.uuid,
+            path.to_str().unwrap()
+        );
+        std::fs::create_dir_all(&path)?;
 
         // download and validate main file
+        info!("Downloading main file...");
         let main_file_path = path.join("main.unity3d").to_str().unwrap().to_string();
         util::download_to_file(&self.main_file_url, &main_file_path).await?;
         let main_file_info = FileInfo::build_file(&main_file_path).unwrap();
+        info!("Validating main file...");
         main_file_info.validate(&self.main_file_info)?;
 
         let bundle_names = self.asset_info.bundles.keys().clone();
@@ -205,7 +211,15 @@ impl Version {
         }
         info!("Download complete");
 
-        self.validate_compressed(path.to_str().unwrap()).await?;
+        let corrupted = self.validate_compressed(path.to_str().unwrap()).await?;
+        if !corrupted.is_empty() {
+            return Err(format!(
+                "Download failed, {} bundles could not be validated: {:?}",
+                corrupted.len(),
+                corrupted
+            )
+            .into());
+        }
 
         Ok(())
     }
@@ -403,17 +417,17 @@ impl FileInfo {
     }
 
     fn validate(&self, good: &Self) -> Result<(), String> {
-        if self.hash != good.hash {
-            return Err(format!(
-                "Bad hash: {} (disk) vs {} (manifest)",
-                self.hash, good.hash
-            ));
-        }
-
         if self.size != good.size {
             return Err(format!(
                 "Bad size: {} (disk) vs {} (manifest)",
                 self.size, good.size
+            ));
+        }
+
+        if self.hash != good.hash {
+            return Err(format!(
+                "Bad hash: {} (disk) vs {} (manifest)",
+                self.hash, good.hash
             ));
         }
 
