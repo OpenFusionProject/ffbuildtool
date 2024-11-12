@@ -82,20 +82,9 @@ impl Version {
                 .to_string();
             let corrupted = Arc::clone(&corrupted);
             tasks.push(tokio::spawn(async move {
-                match FileInfo::build_file(&file_path) {
-                    Ok(file_info) => {
-                        if file_info != bundle_info.compressed_info {
-                            warn!(
-                                "File info mismatch for {} (compressed): {:?} vs {:?}",
-                                bundle_name, file_info, bundle_info.compressed_info
-                            );
-                            corrupted.lock().unwrap().push(bundle_name.clone());
-                        }
-                    }
-                    Err(_) => {
-                        warn!("Bad/missing file for {}", bundle_name);
-                        corrupted.lock().unwrap().push(bundle_name.clone());
-                    }
+                if let Err(e) = bundle_info.validate_compressed(&file_path) {
+                    warn!("{} failed validation: {}", bundle_name, e);
+                    corrupted.lock().unwrap().push(bundle_name);
                 }
             }));
         }
@@ -120,25 +109,22 @@ impl Version {
         for (bundle_name, bundle_info) in bundles {
             let corrupted = Arc::clone(&corrupted);
             let bundle_name_url_encoded = util::url_encode(&bundle_name);
-            let file_path = PathBuf::from(path).join(&bundle_name_url_encoded);
+            let folder_path = PathBuf::from(path).join(&bundle_name_url_encoded);
             tasks.push(tokio::spawn(async move {
-                for (file_name, file_info_good) in bundle_info.uncompressed_info {
-                    let file_id: String = format!("{}/{}", bundle_name, file_name);
-                    let file_path = file_path.join(&file_name);
-                    match FileInfo::build_file(file_path.to_str().unwrap()) {
-                        Ok(file_info) => {
-                            if file_info != file_info_good {
-                                warn!(
-                                    "File info mismatch for {} (uncompressed): {:?} vs {:?}",
-                                    file_id, file_info, file_info
-                                );
-                                corrupted.lock().unwrap().push(file_id);
+                match bundle_info.validate_uncompressed(folder_path.to_str().unwrap()) {
+                    Ok(corrupted_files) => {
+                        if !corrupted_files.is_empty() {
+                            for (file_name, e) in &corrupted_files {
+                                warn!("{} failed validation: {}", file_name, e);
                             }
+                            corrupted.lock().unwrap().extend(
+                                corrupted_files.into_iter().map(|(file_name, _)| file_name),
+                            );
                         }
-                        Err(_) => {
-                            warn!("Bad/missing file for {}", file_id);
-                            corrupted.lock().unwrap().push(file_id);
-                        }
+                    }
+                    Err(e) => {
+                        warn!("{} failed validation: {}", bundle_name, e);
+                        corrupted.lock().unwrap().push(bundle_name);
                     }
                 }
             }));
@@ -242,6 +228,26 @@ impl BundleInfo {
     fn get_uncompressed_size(&self) -> u64 {
         self.uncompressed_info.values().map(|info| info.size).sum()
     }
+
+    fn validate_compressed(&self, file_path: &str) -> Result<(), Error> {
+        let file_info = FileInfo::build_file(file_path)?;
+        file_info.validate(&self.compressed_info)?;
+        Ok(())
+    }
+
+    fn validate_uncompressed(&self, folder_path: &str) -> Result<Vec<(String, String)>, Error> {
+        let folder_path_leaf = util::get_file_name_without_parent(folder_path);
+        let mut corrupted = Vec::new();
+        for (file_name, file_info_good) in &self.uncompressed_info {
+            let file_path = PathBuf::from(folder_path).join(file_name);
+            let file_info = FileInfo::build_file(file_path.to_str().unwrap())?;
+            if let Err(e) = file_info.validate(file_info_good) {
+                let file_id = format!("{}/{}", folder_path_leaf, file_name);
+                corrupted.push((file_id, e));
+            }
+        }
+        Ok(corrupted)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -265,9 +271,12 @@ impl FileInfo {
     }
 
     fn build_file(file_path: &str) -> Result<Self, Error> {
-        let hash = util::get_file_hash(file_path)?;
-        let size = std::fs::metadata(file_path)?.len();
-        Ok(Self { hash, size })
+        let build_file_internal = || -> Result<Self, Error> {
+            let hash = util::get_file_hash(file_path)?;
+            let size = std::fs::metadata(file_path)?.len();
+            Ok(Self { hash, size })
+        };
+        build_file_internal().map_err(|_| format!("File not found: {}", file_path).into())
     }
 
     #[cfg(feature = "lzma")]
@@ -275,6 +284,24 @@ impl FileInfo {
         let hash = util::get_buffer_hash(buffer);
         let size = buffer.len() as u64;
         Self { hash, size }
+    }
+
+    fn validate(&self, good: &Self) -> Result<(), String> {
+        if self.hash != good.hash {
+            return Err(format!(
+                "Bad hash: {} (disk) vs {} (manifest)",
+                self.hash, good.hash
+            ));
+        }
+
+        if self.size != good.size {
+            return Err(format!(
+                "Bad size: {} (disk) vs {} (manifest)",
+                self.size, good.size
+            ));
+        }
+
+        Ok(())
     }
 }
 
