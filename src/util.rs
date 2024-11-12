@@ -148,3 +148,10 @@ pub fn url_encode(input: &str) -> String {
     }
     output
 }
+
+pub async fn download_to_file(url: &str, file_path: &str) -> Result<(), Error> {
+    let response = reqwest::get(url).await?;
+    let mut file = std::fs::File::create(file_path)?;
+    std::io::copy(&mut response.bytes().await?.as_ref(), &mut file)?;
+    Ok(())
+}

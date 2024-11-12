@@ -6,4 +6,7 @@ manifest.json
 # extract_bundle example output
 example_extracted/
 
+# download_build example output
+example_builds/downloaded/
+
 __info

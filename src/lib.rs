@@ -6,6 +6,7 @@ use std::{
 
 use bundle::AssetBundle;
 use serde::{Deserialize, Serialize};
+use tokio::task::JoinHandle;
 use util::TempFile;
 use uuid::Uuid;
 
@@ -50,6 +51,10 @@ impl Version {
             main_file_info,
             asset_info,
         })
+    }
+
+    pub fn get_uuid(&self) -> Uuid {
+        self.uuid
     }
 
     pub fn from_manifest(path: &str) -> Result<Self, Error> {
@@ -142,6 +147,45 @@ impl Version {
         info!("Validation complete; {} corrupted files", corrupted.len());
         Ok(corrupted)
     }
+
+    pub async fn download_compressed(&self, path: &str) -> Result<(), Error> {
+        info!("Downloading build {} to {}", self.uuid, path);
+        std::fs::create_dir_all(path)?;
+        let path = PathBuf::from(path);
+
+        // download and validate main file
+        let main_file_path = path.join("main.unity3d").to_str().unwrap().to_string();
+        util::download_to_file(&self.main_file_url, &main_file_path).await?;
+        let main_file_info = FileInfo::build_file(&main_file_path).unwrap();
+        main_file_info.validate(&self.main_file_info)?;
+
+        let bundle_names = self.asset_info.bundles.keys().clone();
+        let mut tasks: Vec<tokio::task::JoinHandle<Result<(), String>>> =
+            Vec::with_capacity(bundle_names.len());
+        info!("Downloading assets...");
+        for bundle_name in bundle_names {
+            let file_url = format!("{}/{}", self.asset_info.asset_url, bundle_name);
+            let file_path = path.join(bundle_name).to_str().unwrap().to_string();
+            tasks.push(tokio::spawn(async move {
+                util::download_to_file(&file_url, &file_path)
+                    .await
+                    .map_err(|e| format!("Failed to download {}: {}", file_url, e))?;
+                debug!("Downloaded {}", file_url);
+                Ok(())
+            }));
+        }
+
+        for task in tasks {
+            if let Err(e) = task.await? {
+                return Err(e.into());
+            }
+        }
+        info!("Download complete");
+
+        self.validate_compressed(path.to_str().unwrap()).await?;
+
+        Ok(())
+    }
 }
 
 /// Contains the info for each asset bundle in the build.
@@ -172,19 +216,24 @@ impl AssetInfo {
         info!("Processing...");
 
         let bundles: Arc<Mutex<HashMap<String, BundleInfo>>> = Arc::new(Mutex::new(HashMap::new()));
-        let mut tasks = Vec::with_capacity(bundle_names.len());
+        let mut tasks: Vec<JoinHandle<Result<(), String>>> = Vec::with_capacity(bundle_names.len());
         for bundle_name in bundle_names {
             let root = asset_root.to_string();
             let bundles = Arc::clone(&bundles);
             tasks.push(tokio::spawn(async move {
-                let bundle_info = BundleInfo::build(&root, &bundle_name).await.unwrap();
+                let bundle_info = BundleInfo::build(&root, &bundle_name)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 debug!("Processed {}", bundle_name);
                 bundles.lock().unwrap().insert(bundle_name, bundle_info);
+                Ok(())
             }));
         }
 
         for task in tasks {
-            task.await?;
+            if let Err(e) = task.await? {
+                return Err(e.into());
+            }
         }
         info!("Done processing");
 
