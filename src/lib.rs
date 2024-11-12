@@ -67,6 +67,12 @@ impl Version {
         Ok(version)
     }
 
+    pub async fn from_manifest_url(url: &str) -> Result<Self, Error> {
+        let manifest = TempFile::download(url).await?;
+        let version = Self::from_manifest(manifest.path())?;
+        Ok(version)
+    }
+
     /// Exports the `Version` metadata to a JSON file to be served from an API server.
     pub fn export_manifest(&self, path: &str) -> Result<(), Error> {
         let json = serde_json::to_string_pretty(self)?;
