@@ -13,18 +13,20 @@ serde_json = "1.0.132"
 sha2 = "0.10.8"
 tokio = { version = "1.41.1", features = ["full"] }
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
-env_logger = { version = "0.11.5", features = ["color"] }
-clap = { version = "4.5.20", features = ["derive"] }
+env_logger = { version = "0.11.5", features = ["color"], optional = true }
+clap = { version = "4.5.20", features = ["derive"], optional = true }
 
 [lib]
 name = "ffbuildtool"
 
+[features]
+default = ["lzma", "cli"]
+lzma = ["dep:rust-lzma"]
+cli = ["dep:clap", "dep:env_logger"]
+
 [[bin]]
 name = "ffbuildtool"
-
-[features]
-default = ["lzma"]
-lzma = ["dep:rust-lzma"]
+required-features = ["cli"]
 
 [[example]]
 name = "gen_manifest"
@@ -43,3 +45,6 @@ name = "download_build"
 
 [[example]]
 name = "repair_build"
+
+[dev-dependencies]
+env_logger = { version = "0.11.5", features = ["color"] }
