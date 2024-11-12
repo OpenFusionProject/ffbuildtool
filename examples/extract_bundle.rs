@@ -23,7 +23,7 @@ async fn main() {
         asset.extract_files(output_dir).unwrap();
         info!("Extraction took {:?}", time.elapsed());
 
-        let version = Version::from_manifest("example_manifest.json").unwrap();
+        let version = Version::from_manifest_file("example_manifest.json").unwrap();
         let bundle = version.get_bundle(bundle_name).unwrap();
         let bundle_name_url_encoded = util::url_encode(bundle_name);
         let bundle_root = PathBuf::from(output_dir).join(bundle_name_url_encoded);

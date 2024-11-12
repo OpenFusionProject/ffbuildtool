@@ -7,7 +7,7 @@ async fn main() {
     env_logger::builder().format_timestamp(None).init();
 
     let manifest_path = "example_manifest.json";
-    let version = Version::from_manifest(manifest_path).unwrap();
+    let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let asset_root_good = "example_builds\\compressed\\good\\";
     let time = std::time::Instant::now();

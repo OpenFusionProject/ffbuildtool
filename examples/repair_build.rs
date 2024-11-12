@@ -16,7 +16,7 @@ async fn main() {
         .canonicalize()
         .unwrap();
 
-    let mut version = Version::from_manifest("example_manifest.json").unwrap();
+    let mut version = Version::from_manifest_file("example_manifest.json").unwrap();
     let test_asset_url = util::file_path_to_uri(good_build_path.to_str().unwrap());
     version.set_asset_url(&test_asset_url);
     info!("Overrode asset URL: {}", test_asset_url);

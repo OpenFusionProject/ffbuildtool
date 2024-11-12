@@ -8,7 +8,7 @@ async fn main() {
 
     let asset_root = "example_builds\\uncompressed\\good\\";
     let manifest_path = "example_manifest.json";
-    let version = Version::from_manifest(manifest_path).unwrap();
+    let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let time = std::time::Instant::now();
     let corrupted = version.validate_uncompressed(asset_root).await.unwrap();

@@ -62,8 +62,17 @@ impl Version {
         self.asset_info.asset_url = asset_url.to_string();
     }
 
+    /// Loads the `Version` metadata from a JSON manifest file path or URL.
+    pub async fn from_manifest(path_or_url: &str) -> Result<Self, Error> {
+        if path_or_url.starts_with("http") {
+            Self::from_manifest_url(path_or_url).await
+        } else {
+            Self::from_manifest_file(path_or_url)
+        }
+    }
+
     /// Loads the `Version` metadata from a JSON manifest file.
-    pub fn from_manifest(path: &str) -> Result<Self, Error> {
+    pub fn from_manifest_file(path: &str) -> Result<Self, Error> {
         let json = std::fs::read_to_string(path)?;
         let version: Self = serde_json::from_str(&json)?;
         Ok(version)
@@ -72,7 +81,7 @@ impl Version {
     /// Loads the `Version` metadata from a JSON manifest file hosted on the web.
     pub async fn from_manifest_url(url: &str) -> Result<Self, Error> {
         let manifest = TempFile::download(url).await?;
-        let version = Self::from_manifest(manifest.path())?;
+        let version = Self::from_manifest_file(manifest.path())?;
         Ok(version)
     }
 

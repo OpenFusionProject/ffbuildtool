@@ -9,7 +9,7 @@ use crate::{
 #[tokio::test]
 async fn test_validate_compressed_good() {
     let manifest_path = "example_manifest.json";
-    let version = Version::from_manifest(manifest_path).unwrap();
+    let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let asset_root_good = "example_builds\\compressed\\good\\";
     let corrupted = version.validate_compressed(asset_root_good).await.unwrap();
@@ -19,7 +19,7 @@ async fn test_validate_compressed_good() {
 #[tokio::test]
 async fn test_validate_compressed_bad() {
     let manifest_path = "example_manifest.json";
-    let version = Version::from_manifest(manifest_path).unwrap();
+    let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let asset_root_bad = "example_builds\\compressed\\bad\\";
     let corrupted = version.validate_compressed(asset_root_bad).await.unwrap();
@@ -30,7 +30,7 @@ async fn test_validate_compressed_bad() {
 async fn test_validate_uncompressed_good() {
     let asset_root = "example_builds\\uncompressed\\good\\";
     let manifest_path = "example_manifest.json";
-    let version = Version::from_manifest(manifest_path).unwrap();
+    let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let corrupted = version.validate_uncompressed(asset_root).await.unwrap();
     assert!(corrupted.is_empty());
@@ -40,7 +40,7 @@ async fn test_validate_uncompressed_good() {
 async fn test_validate_uncompressed_bad() {
     let asset_root_bad = "example_builds\\uncompressed\\bad\\";
     let manifest_path = "example_manifest.json";
-    let version = Version::from_manifest(manifest_path).unwrap();
+    let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let corrupted = version.validate_uncompressed(asset_root_bad).await.unwrap();
     assert_eq!(
@@ -70,7 +70,7 @@ async fn test_generate_manifest() {
     .unwrap();
 
     let example_manifest = "example_manifest.json";
-    let example_version = Version::from_manifest(example_manifest).unwrap();
+    let example_version = Version::from_manifest_file(example_manifest).unwrap();
     version.uuid = example_version.uuid;
     assert_eq!(version, example_version);
 
@@ -88,7 +88,7 @@ async fn test_extract_bundle() {
     let output_files_dir =
         PathBuf::from(output_dir.path()).join(util::url_encode("Map_00_00.unity3d"));
 
-    let version = Version::from_manifest("example_manifest.json").unwrap();
+    let version = Version::from_manifest_file("example_manifest.json").unwrap();
     let bundle_info = version.get_bundle("Map_00_00.unity3d").unwrap();
 
     bundle_info
