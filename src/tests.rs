@@ -1,4 +1,10 @@
-use crate::Version;
+use std::path::PathBuf;
+
+use crate::{
+    bundle::AssetBundle,
+    util::{self, TempDir},
+    Version,
+};
 
 #[tokio::test]
 async fn test_validate_compressed_good() {
@@ -39,7 +45,7 @@ async fn test_validate_uncompressed_bad() {
     let corrupted = version.validate_uncompressed(asset_root_bad).await.unwrap();
     assert_eq!(
         corrupted,
-        vec!["DongResources_00_09.resourceFile/CustomAssetBundle-52625066c401043eda0a3d5088cda126"]
+        vec!["DongResources_5f00_5f09_2eresourceFile/CustomAssetBundle-52625066c401043eda0a3d5088cda126"]
     );
 }
 
@@ -70,4 +76,22 @@ async fn test_generate_manifest() {
 
     let corrupted = version.validate_compressed(asset_root).await.unwrap();
     assert!(corrupted.is_empty());
+}
+
+#[tokio::test]
+async fn test_extract_bundle() {
+    let bundle_path = "example_builds\\compressed\\good\\Map_00_00.unity3d";
+    let output_dir = TempDir::new();
+
+    let asset_bundle = AssetBundle::from_file(bundle_path).unwrap();
+    asset_bundle.extract_files(output_dir.path()).unwrap();
+    let output_files_dir =
+        PathBuf::from(output_dir.path()).join(util::url_encode("Map_00_00.unity3d"));
+
+    let version = Version::from_manifest("example_manifest.json").unwrap();
+    let bundle_info = version.get_bundle("Map_00_00.unity3d").unwrap();
+
+    bundle_info
+        .validate_uncompressed(output_files_dir.to_str().unwrap())
+        .unwrap();
 }

@@ -79,6 +79,35 @@ impl Drop for TempFile {
     }
 }
 
+/// RAII struct for temporary directories
+pub struct TempDir {
+    path: String,
+}
+impl Default for TempDir {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl TempDir {
+    pub fn new() -> Self {
+        let dir_name = Uuid::new_v4().to_string();
+        let path = std::env::temp_dir().join(dir_name);
+        std::fs::create_dir(&path).unwrap();
+        Self {
+            path: path.to_string_lossy().to_string(),
+        }
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+}
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 pub fn read_u32<T: BufRead>(reader: &mut T) -> Result<u32, Error> {
     let mut buf = [0; 4];
     reader.read_exact(&mut buf)?;
