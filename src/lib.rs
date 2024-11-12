@@ -57,16 +57,19 @@ impl Version {
         self.uuid
     }
 
+    /// Overrides the asset URL for the build. Useful for testing.
     pub fn set_asset_url(&mut self, asset_url: &str) {
         self.asset_info.asset_url = asset_url.to_string();
     }
 
+    /// Loads the `Version` metadata from a JSON manifest file.
     pub fn from_manifest(path: &str) -> Result<Self, Error> {
         let json = std::fs::read_to_string(path)?;
         let version: Self = serde_json::from_str(&json)?;
         Ok(version)
     }
 
+    /// Loads the `Version` metadata from a JSON manifest file hosted on the web.
     pub async fn from_manifest_url(url: &str) -> Result<Self, Error> {
         let manifest = TempFile::download(url).await?;
         let version = Self::from_manifest(manifest.path())?;
@@ -117,6 +120,7 @@ impl Version {
         Ok(corrupted)
     }
 
+    /// Validates the uncompressed asset bundles against the metadata. Returns a list of corrupted files.
     pub async fn validate_uncompressed(&self, path: &str) -> Result<Vec<String>, Error> {
         info!(
             "Validating uncompressed asset bundles for {} ({})...",
@@ -158,6 +162,7 @@ impl Version {
         Ok(corrupted)
     }
 
+    /// Downloads all compressed asset bundles and the main file for this build to the specified path.
     pub async fn download_compressed(&self, path: &str) -> Result<(), Error> {
         info!("Downloading build {} to {}", self.uuid, path);
         std::fs::create_dir_all(path)?;
@@ -197,6 +202,7 @@ impl Version {
         Ok(())
     }
 
+    /// Repairs the build by re-downloading corrupted asset bundles.
     pub async fn repair(&self, path: &str) -> Result<Vec<String>, Error> {
         info!("Repairing build {} at {}", self.uuid, path);
         let corrupted = self.validate_compressed(path).await?;
