@@ -114,7 +114,7 @@ pub fn url_encode(input: &str) -> String {
         if byte.is_ascii_alphanumeric() {
             output.push(byte as char);
         } else {
-            output.push_str(&format!("_{:02X}", byte));
+            output.push_str(&format!("_{:02x}", byte));
         }
     }
     output
