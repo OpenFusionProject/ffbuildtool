@@ -4,6 +4,7 @@
 use std::{
     collections::HashMap,
     io::{Read as _, Seek as _},
+    path::PathBuf,
 };
 
 use log::*;
@@ -16,6 +17,7 @@ use crate::FileInfo;
 #[derive(Debug)]
 pub struct AssetBundle {
     path: String,
+    //
     signature: String,
     format: u32,
     player_version: String,
@@ -44,6 +46,11 @@ impl AssetBundle {
         // In the one case where file_size1 and file_size2 differ, I noticed
         // that file_size2 is the one thata matches the actual file size.
         self.file_size2.unwrap_or(self.file_size1) as u64
+    }
+
+    /// Returns the name of the file that this AssetBundle was created from.
+    pub fn get_file_name(&self) -> &str {
+        util::get_file_name_without_parent(&self.path)
     }
 
     pub fn from_file(path: &str) -> Result<Self, Error> {
@@ -122,6 +129,24 @@ impl AssetBundle {
             .map(|file| (file.name, FileInfo::build_buffer(&file.data)))
             .collect();
         Ok(result)
+    }
+
+    #[cfg(feature = "lzma")]
+    pub fn extract_files(&self, output_dir: &str) -> Result<(), Error> {
+        let url_encoded_name = util::url_encode(self.get_file_name());
+        let path = PathBuf::from(output_dir).join(url_encoded_name);
+
+        std::fs::create_dir_all(std::path::Path::new(&path))?;
+
+        let files = self.get_file_entries()?;
+        for file in files {
+            let file_id = format!("{}/{}", output_dir, file.name);
+            let path = path.join(&file.name);
+            if let Err(e) = std::fs::write(&path, &file.data) {
+                warn!("Failed to write {}: {}", file_id, e);
+            }
+        }
+        Ok(())
     }
 
     #[cfg(feature = "lzma")]

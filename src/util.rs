@@ -25,6 +25,13 @@ pub fn get_file_extension(file_path: &str) -> Option<&str> {
         .and_then(|ext| ext.to_str())
 }
 
+pub fn get_file_name_without_extension(file_path: &str) -> &str {
+    std::path::Path::new(file_path)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(file_path)
+}
+
 pub fn get_file_name_without_parent(file_path: &str) -> &str {
     std::path::Path::new(file_path)
         .file_name()

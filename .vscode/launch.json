@@ -88,6 +88,28 @@
                 "RUST_LOG_STYLE": "always"
             },
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'extract_bundle'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=extract_bundle",
+                    "--package=ffbuildtool"
+                ],
+                "filter": {
+                    "name": "extract_bundle",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "env": {
+                "RUST_LOG": "debug",
+                "RUST_LOG_STYLE": "always"
+            },
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

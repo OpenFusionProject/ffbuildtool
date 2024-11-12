@@ -65,6 +65,10 @@ impl Version {
         Ok(())
     }
 
+    pub fn get_bundle(&self, name: &str) -> Option<&BundleInfo> {
+        self.asset_info.bundles.get(name)
+    }
+
     /// Validates the compressed asset bundles against the metadata. Returns a list of corrupted bundles.
     pub async fn validate_compressed(&self, path: &str) -> Result<Vec<String>, Error> {
         info!(
@@ -194,7 +198,7 @@ impl AssetInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-struct BundleInfo {
+pub struct BundleInfo {
     compressed_info: FileInfo,
     uncompressed_info: HashMap<String, FileInfo>,
 }
@@ -229,13 +233,13 @@ impl BundleInfo {
         self.uncompressed_info.values().map(|info| info.size).sum()
     }
 
-    fn validate_compressed(&self, file_path: &str) -> Result<(), Error> {
+    pub fn validate_compressed(&self, file_path: &str) -> Result<(), Error> {
         let file_info = FileInfo::build_file(file_path)?;
         file_info.validate(&self.compressed_info)?;
         Ok(())
     }
 
-    fn validate_uncompressed(&self, folder_path: &str) -> Result<Vec<(String, String)>, Error> {
+    pub fn validate_uncompressed(&self, folder_path: &str) -> Result<Vec<(String, String)>, Error> {
         let folder_path_leaf = util::get_file_name_without_parent(folder_path);
         let mut corrupted = Vec::new();
         for (file_name, file_info_good) in &self.uncompressed_info {

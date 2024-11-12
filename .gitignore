@@ -2,3 +2,8 @@
 
 # gen_manifest example output
 manifest.json
+
+# extract_bundle example output
+example_extracted/
+
+__info
