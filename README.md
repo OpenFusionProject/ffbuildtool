@@ -6,6 +6,12 @@ Current features:
 - Generate a full version manifest from a path containing compressed asset bundles
 - Validate compressed asset bundles given a manifest
 - Validate uncompressed asset bundles given a manifest
+- Extract compressed asset bundles
+- Download & validate all the compressed asset bundles given a manifest
+
+TODO:
+- Repair compressed asset bundles given a manifest
+- CLI so you can do all this without writing code
 
 ## Building
 
