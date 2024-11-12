@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use log::*;
 
-type Error = Box<dyn std::error::Error>;
+pub type Error = Box<dyn std::error::Error>;
 
 pub mod bundle;
 pub mod util;
@@ -26,7 +26,6 @@ pub struct Version {
     uuid: Uuid,
     description: Option<String>,
     parent_uuid: Option<Uuid>,
-    /// The main file may be located outside of the asset root.
     main_file_url: String,
     main_file_info: FileInfo,
     asset_info: AssetInfo,
@@ -34,20 +33,20 @@ pub struct Version {
 impl Version {
     /// Generates `Version` metadata given a local build root (compressed asset bundles).
     pub async fn build(
-        main_path: &str,
-        main_url: &str,
         asset_root: &str,
         asset_url: &str,
         description: Option<&str>,
         parent: Option<Uuid>,
     ) -> Result<Self, Error> {
-        let main_file_info = FileInfo::build(main_path).await?;
+        let main_path = format!("{}main.unity3d", asset_root);
+        let main_file_info = FileInfo::build(&main_path).await?;
         let asset_info = AssetInfo::build(asset_root, asset_url).await?;
+        let main_file_url = format!("{}main.unity3d", asset_url);
         Ok(Self {
             uuid: Uuid::new_v4(),
             description: description.map(|s| s.to_string()),
             parent_uuid: parent,
-            main_file_url: main_url.to_string(),
+            main_file_url,
             main_file_info,
             asset_info,
         })

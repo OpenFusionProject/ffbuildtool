@@ -8,22 +8,13 @@ async fn main() {
 
     let asset_root = "example_builds\\compressed\\good\\";
     let asset_url = "http://example.url/builds/example_build/";
-    let main_path = format!("{}main.unity3d", asset_root);
-    let main_url = format!("{}main.unity3d", asset_url);
     let description = Some("example-build");
     let parent = None;
 
     let time = std::time::Instant::now();
-    let version = Version::build(
-        &main_path,
-        &main_url,
-        asset_root,
-        asset_url,
-        description,
-        parent,
-    )
-    .await
-    .unwrap();
+    let version = Version::build(asset_root, asset_url, description, parent)
+        .await
+        .unwrap();
     info!("Processing took {:?}", time.elapsed());
 
     let outfile = "manifest.json";
