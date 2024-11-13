@@ -1,6 +1,9 @@
+use std::sync::OnceLock;
+
 use clap::{Args, Parser, Subcommand};
 
 use ffbuildtool::{Error, Version};
+use indicatif::{ProgressBar, ProgressStyle};
 use log::LevelFilter;
 use uuid::Uuid;
 
@@ -130,8 +133,22 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
 }
 
 async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
+    static PB: OnceLock<ProgressBar> = OnceLock::new();
+    fn download_callback(name: &str, size: u64) {
+        let pb = PB.get().unwrap();
+        pb.set_message(name.to_string());
+        pb.inc(size);
+    }
     let version = Version::from_manifest(&args.manifest_path).await?;
-    version.download_compressed(&args.output_path, None).await
+    let pb = ProgressBar::new(version.get_compressed_size());
+    pb.set_style(
+        ProgressStyle::with_template("[{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
+            .unwrap(),
+    );
+    PB.set(pb).unwrap();
+    version
+        .download_compressed(&args.output_path, Some(download_callback))
+        .await
 }
 
 async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
