@@ -149,18 +149,17 @@ pub fn url_encode(input: &str) -> String {
     output
 }
 
-pub async fn download_to_file(url: &str, file_path: &str) -> Result<(), Error> {
+pub async fn download_to_file(url: &str, file_path: &str) -> Result<u64, Error> {
     // If the url is a file path, copy the file instead of downloading it
     if url.starts_with("file:///") {
         let path = url.trim_start_matches("file:///");
         std::fs::copy(path, file_path)?;
-        return Ok(());
+    } else {
+        let response = reqwest::get(url).await?;
+        let mut file = std::fs::File::create(file_path)?;
+        std::io::copy(&mut response.bytes().await?.as_ref(), &mut file)?;
     }
-
-    let response = reqwest::get(url).await?;
-    let mut file = std::fs::File::create(file_path)?;
-    std::io::copy(&mut response.bytes().await?.as_ref(), &mut file)?;
-    Ok(())
+    Ok(std::fs::metadata(file_path)?.len())
 }
 
 pub fn copy_dir(from: &str, to: &str, recursive: bool) -> Result<(), Error> {

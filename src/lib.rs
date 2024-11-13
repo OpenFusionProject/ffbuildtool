@@ -13,6 +13,7 @@ use uuid::Uuid;
 use log::*;
 
 pub type Error = Box<dyn std::error::Error>;
+pub type DownloadCallback = fn(&str, u64); // bundle name, file size
 
 pub mod bundle;
 pub mod util;
@@ -54,6 +55,14 @@ impl Version {
 
     pub fn get_uuid(&self) -> Uuid {
         self.uuid
+    }
+
+    pub fn get_compressed_size(&self) -> u64 {
+        self.asset_info.total_compressed_size
+    }
+
+    pub fn get_uncompressed_size(&self) -> u64 {
+        self.asset_info.total_uncompressed_size
     }
 
     /// Overrides the asset URL for the build. Useful for testing.
@@ -171,7 +180,11 @@ impl Version {
     }
 
     /// Downloads all compressed asset bundles and the main file for this build to the specified path.
-    pub async fn download_compressed(&self, path: &str) -> Result<(), Error> {
+    pub async fn download_compressed(
+        &self,
+        path: &str,
+        callback: Option<DownloadCallback>,
+    ) -> Result<(), Error> {
         let path = PathBuf::from(path).join(self.uuid.to_string());
         info!(
             "Downloading build {} to {}",
@@ -188,18 +201,21 @@ impl Version {
         info!("Validating main file...");
         main_file_info.validate(&self.main_file_info)?;
 
-        let bundle_names = self.asset_info.bundles.keys().clone();
+        let bundle_names = self.asset_info.bundles.keys().cloned();
         let mut tasks: Vec<tokio::task::JoinHandle<Result<(), String>>> =
             Vec::with_capacity(bundle_names.len());
         info!("Downloading assets...");
         for bundle_name in bundle_names {
             let file_url = format!("{}/{}", self.asset_info.asset_url, bundle_name);
-            let file_path = path.join(bundle_name).to_str().unwrap().to_string();
+            let file_path = path.join(&bundle_name).to_str().unwrap().to_string();
             tasks.push(tokio::spawn(async move {
-                util::download_to_file(&file_url, &file_path)
+                let file_size = util::download_to_file(&file_url, &file_path)
                     .await
                     .map_err(|e| format!("Failed to download {}: {}", file_url, e))?;
                 debug!("Downloaded {}", file_url);
+                if let Some(callback) = callback {
+                    callback(&bundle_name, file_size);
+                }
                 Ok(())
             }));
         }

@@ -131,7 +131,7 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
 
 async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
     let version = Version::from_manifest(&args.manifest_path).await?;
-    version.download_compressed(&args.output_path).await
+    version.download_compressed(&args.output_path, None).await
 }
 
 async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
