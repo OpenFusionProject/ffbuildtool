@@ -147,6 +147,10 @@ pub fn url_encode(input: &str) -> String {
             output.push_str(&format!("_{:02x}", byte));
         }
     }
+
+    // Convert everything up to the first underscore to lowercase
+    let first_underscore = output.find('_').unwrap_or(output.len());
+    output[..first_underscore].make_ascii_lowercase();
     output
 }
 

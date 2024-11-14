@@ -42,10 +42,17 @@ async fn test_validate_uncompressed_bad() {
     let manifest_path = "example_manifest.json";
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
-    let corrupted = version.validate_uncompressed(asset_root_bad).await.unwrap();
+    let corrupted = version
+        .validate_uncompressed(asset_root_bad)
+        .await
+        .unwrap()
+        .iter()
+        .map(|x| x.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
     assert_eq!(
         corrupted,
-        vec!["DongResources_5f00_5f09_2eresourceFile/CustomAssetBundle-52625066c401043eda0a3d5088cda126"]
+        vec!["DongResources_5f00_5f09_2eresourceFile/CustomAssetBundle-52625066c401043eda0a3d5088cda126".to_ascii_lowercase()]
     );
 }
 
