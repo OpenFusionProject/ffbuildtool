@@ -89,7 +89,8 @@ async fn test_extract_bundle() {
     let version = Version::from_manifest_file("example_manifest.json").unwrap();
     let bundle_info = version.get_bundle("Map_00_00.unity3d").unwrap();
 
-    bundle_info
+    let corrupted = bundle_info
         .validate_uncompressed(output_files_dir.to_str().unwrap())
         .unwrap();
+    assert!(corrupted.is_empty());
 }
