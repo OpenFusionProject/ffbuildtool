@@ -18,7 +18,7 @@ async fn main() {
     env_logger::builder().format_timestamp(None).init();
 
     let version = Version::from_manifest_file("manifest_104.json").unwrap();
-    let output_path = "example_builds\\downloaded";
+    let output_path = "example_builds/downloaded";
 
     let time = std::time::Instant::now();
     version

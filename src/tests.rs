@@ -11,7 +11,7 @@ async fn test_validate_compressed_good() {
     let manifest_path = "example_manifest.json";
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
-    let asset_root_good = "example_builds\\compressed\\good\\";
+    let asset_root_good = "example_builds/compressed/good/";
     let corrupted = version.validate_compressed(asset_root_good).await.unwrap();
     assert!(corrupted.is_empty());
 }
@@ -21,14 +21,14 @@ async fn test_validate_compressed_bad() {
     let manifest_path = "example_manifest.json";
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
-    let asset_root_bad = "example_builds\\compressed\\bad\\";
+    let asset_root_bad = "example_builds/compressed/bad/";
     let corrupted = version.validate_compressed(asset_root_bad).await.unwrap();
     assert_eq!(corrupted, vec!["Map_00_00.unity3d"]);
 }
 
 #[tokio::test]
 async fn test_validate_uncompressed_good() {
-    let asset_root = "example_builds\\uncompressed\\good\\";
+    let asset_root = "example_builds/uncompressed/good/";
     let manifest_path = "example_manifest.json";
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
@@ -38,7 +38,7 @@ async fn test_validate_uncompressed_good() {
 
 #[tokio::test]
 async fn test_validate_uncompressed_bad() {
-    let asset_root_bad = "example_builds\\uncompressed\\bad\\";
+    let asset_root_bad = "example_builds/uncompressed/bad/";
     let manifest_path = "example_manifest.json";
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
@@ -51,7 +51,7 @@ async fn test_validate_uncompressed_bad() {
 
 #[tokio::test]
 async fn test_generate_manifest() {
-    let asset_root = "example_builds\\compressed\\good\\";
+    let asset_root = "example_builds/compressed/good/";
     let asset_url = "http://example.url/builds/example_build/";
     let description = Some("example-build");
     let parent = None;
@@ -71,7 +71,7 @@ async fn test_generate_manifest() {
 
 #[tokio::test]
 async fn test_extract_bundle() {
-    let bundle_path = "example_builds\\compressed\\good\\Map_00_00.unity3d";
+    let bundle_path = "example_builds/compressed/good/Map_00_00.unity3d";
     let output_dir = TempDir::new();
 
     let asset_bundle = AssetBundle::from_file(bundle_path).unwrap();

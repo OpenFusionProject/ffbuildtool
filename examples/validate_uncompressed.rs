@@ -6,7 +6,7 @@ use log::*;
 async fn main() {
     env_logger::builder().format_timestamp(None).init();
 
-    let asset_root = "example_builds\\uncompressed\\good\\";
+    let asset_root = "example_builds/uncompressed/good/";
     let manifest_path = "example_manifest.json";
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
@@ -15,7 +15,7 @@ async fn main() {
     info!("Validation took {:?}", time.elapsed());
     assert!(corrupted.is_empty());
 
-    let asset_root_bad = "example_builds\\uncompressed\\bad\\";
+    let asset_root_bad = "example_builds/uncompressed/bad/";
     let time = std::time::Instant::now();
     let corrupted = version.validate_uncompressed(asset_root_bad).await.unwrap();
     info!(

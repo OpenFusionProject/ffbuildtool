@@ -11,8 +11,8 @@ use log::*;
 async fn main() {
     env_logger::builder().format_timestamp(None).init();
 
-    let build_path = "example_builds\\compressed\\bad\\";
-    let good_build_path = PathBuf::from("example_builds\\compressed\\good\\")
+    let build_path = "example_builds/compressed/bad/";
+    let good_build_path = PathBuf::from("example_builds/compressed/good/")
         .canonicalize()
         .unwrap();
 
@@ -28,4 +28,7 @@ async fn main() {
     let time = std::time::Instant::now();
     version.repair(new_path).await.unwrap();
     info!("Repairing took {:?}", time.elapsed());
+
+    let corrupted = version.validate_compressed(new_path).await.unwrap();
+    assert!(corrupted.is_empty());
 }

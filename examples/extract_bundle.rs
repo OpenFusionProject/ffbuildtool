@@ -14,8 +14,8 @@ async fn main() {
     #[cfg(feature = "lzma")]
     {
         let bundle_name = "Map_01_03.unity3d";
-        let asset_path = format!("example_builds\\compressed\\good\\{}", bundle_name);
-        let output_dir = "example_extracted\\";
+        let asset_path = format!("example_builds/compressed/good/{}", bundle_name);
+        let output_dir = "example_extracted/";
         std::fs::remove_dir_all(output_dir).ok();
 
         let time = std::time::Instant::now();

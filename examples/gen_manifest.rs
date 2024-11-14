@@ -6,7 +6,7 @@ use log::*;
 async fn main() {
     env_logger::builder().format_timestamp(None).init();
 
-    let asset_root = "example_builds\\compressed\\good\\";
+    let asset_root = "example_builds/compressed/good/";
     let asset_url = "http://example.url/builds/example_build/";
     let description = Some("example-build");
     let parent = None;
