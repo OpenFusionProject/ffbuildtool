@@ -76,6 +76,7 @@ async fn test_generate_manifest() {
     assert!(corrupted.is_empty());
 }
 
+#[cfg(feature = "lzma")]
 #[tokio::test]
 async fn test_extract_bundle() {
     let bundle_path = "example_builds/compressed/good/Map_00_00.unity3d";
