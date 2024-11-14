@@ -19,6 +19,14 @@ cargo build
 
 By default, the crate requires liblzma to be installed on the system or it won't build. You can get around this with `--no-default-features` but this will cause uncompressed files to be missing from any created manifests and disable asset bundle extraction.
 
+## Running the CLI
+
+```
+cargo run
+```
+
+Requires the `cli` feature (enabled by default).
+
 ## Running Unit Tests
 
 ```
