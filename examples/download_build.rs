@@ -3,11 +3,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use ffbuildtool::Version;
 
 use log::*;
+use uuid::Uuid;
 
 static TOTAL_DOWNLOAD_SIZE: AtomicU64 = AtomicU64::new(0);
 
-fn download_callback(_name: &str, size: u64) {
-    TOTAL_DOWNLOAD_SIZE.fetch_add(size, Ordering::SeqCst);
+fn download_callback(_uuid: &Uuid, _name: &str, current_size: u64, total_size: u64) {
+    if current_size == total_size {
+        TOTAL_DOWNLOAD_SIZE.fetch_add(current_size, Ordering::SeqCst);
+    }
 }
 
 #[tokio::main]
@@ -25,7 +28,7 @@ async fn main() {
     info!("Downloading and validation took {:?}", time.elapsed());
 
     let total_downloaded = TOTAL_DOWNLOAD_SIZE.load(Ordering::SeqCst);
-    assert!(version.get_compressed_size() == total_downloaded);
+    assert!(version.get_total_compressed_size() == total_downloaded);
     info!(
         "Total download size: {:.2} MB",
         total_downloaded as f64 / 1024.0 / 1024.0

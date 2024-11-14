@@ -7,6 +7,28 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug CLI",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=ffbuildtool",
+                    "--package=ffbuildtool"
+                ],
+                "filter": {
+                    "name": "ffbuildtool",
+                    "kind": "bin"
+                }
+            },
+            "args": ["download-build", "-m", "manifest_104.json", "-o", "idk"],
+            "env": {
+                "RUST_LOG": "debug",
+                "RUST_LOG_STYLE": "always"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug unit tests in library 'ffbuildtool'",
             "cargo": {
                 "args": [

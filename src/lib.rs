@@ -13,7 +13,7 @@ use uuid::Uuid;
 use log::*;
 
 pub type Error = Box<dyn std::error::Error>;
-pub type DownloadCallback = fn(&str, u64); // bundle name, file size
+pub type DownloadCallback = fn(&Uuid, &str, u64, u64); // uuid, item name, current size, total size
 
 pub mod bundle;
 pub mod util;
@@ -57,11 +57,15 @@ impl Version {
         self.uuid
     }
 
-    pub fn get_compressed_size(&self) -> u64 {
+    pub fn get_total_compressed_size(&self) -> u64 {
+        self.main_file_info.size + self.asset_info.total_compressed_size
+    }
+
+    pub fn get_compressed_assets_size(&self) -> u64 {
         self.asset_info.total_compressed_size
     }
 
-    pub fn get_uncompressed_size(&self) -> u64 {
+    pub fn get_uncompressed_assets_size(&self) -> u64 {
         self.asset_info.total_uncompressed_size
     }
 
@@ -185,6 +189,7 @@ impl Version {
         path: &str,
         callback: Option<DownloadCallback>,
     ) -> Result<(), Error> {
+        let uuid = self.uuid;
         let path = PathBuf::from(path).join(self.uuid.to_string());
         info!(
             "Downloading build {} to {}",
@@ -196,7 +201,7 @@ impl Version {
         // download and validate main file
         info!("Downloading main file...");
         let main_file_path = path.join("main.unity3d").to_str().unwrap().to_string();
-        util::download_to_file(&self.main_file_url, &main_file_path).await?;
+        util::download_to_file(Some(uuid), &self.main_file_url, &main_file_path, callback).await?;
         let main_file_info = FileInfo::build_file(&main_file_path).unwrap();
         info!("Validating main file...");
         main_file_info.validate(&self.main_file_info)?;
@@ -209,13 +214,10 @@ impl Version {
             let file_url = format!("{}/{}", self.asset_info.asset_url, bundle_name);
             let file_path = path.join(&bundle_name).to_str().unwrap().to_string();
             tasks.push(tokio::spawn(async move {
-                let file_size = util::download_to_file(&file_url, &file_path)
+                util::download_to_file(Some(uuid), &file_url, &file_path, callback)
                     .await
                     .map_err(|e| format!("Failed to download {}: {}", file_url, e))?;
                 debug!("Downloaded {}", file_url);
-                if let Some(callback) = callback {
-                    callback(&bundle_name, file_size);
-                }
                 Ok(())
             }));
         }
@@ -242,7 +244,8 @@ impl Version {
 
     /// Repairs the build by re-downloading corrupted asset bundles.
     pub async fn repair(&self, path: &str) -> Result<Vec<String>, Error> {
-        info!("Repairing build {} at {}", self.uuid, path);
+        let uuid = self.uuid;
+        info!("Repairing build {} at {}", uuid, path);
         let corrupted = self.validate_compressed(path).await?;
         info!("{} corrupted bundles: {:?}", corrupted.len(), corrupted);
 
@@ -259,7 +262,7 @@ impl Version {
                 if std::fs::exists(&file_path).is_ok_and(|exists| exists) {
                     std::fs::remove_file(&file_path).map_err(|e| e.to_string())?;
                 }
-                util::download_to_file(&url, &file_path)
+                util::download_to_file(Some(uuid), &url, &file_path, None)
                     .await
                     .map_err(|e| e.to_string())?;
                 bundle_info

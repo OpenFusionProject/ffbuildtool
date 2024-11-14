@@ -1,9 +1,12 @@
-use std::sync::OnceLock;
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
 
 use clap::{Args, Parser, Subcommand};
 
 use ffbuildtool::{Error, Version};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::LevelFilter;
 use uuid::Uuid;
 
@@ -96,6 +99,52 @@ struct ExtractBundleArgs {
     output_dir: String,
 }
 
+#[derive(Debug)]
+struct ProgressManager {
+    multi: MultiProgress,
+    bars: Mutex<HashMap<String, ProgressBar>>,
+    max_bars: usize,
+}
+impl ProgressManager {
+    fn new() -> Self {
+        Self {
+            multi: MultiProgress::new(),
+            bars: Mutex::new(HashMap::new()),
+            max_bars: 10,
+        }
+    }
+
+    fn update_item(&self, name: &str, current: u64, total: u64) {
+        let mut bars = self.bars.lock().unwrap();
+        let pb = if let Some(pb) = bars.get(name) {
+            pb
+        } else {
+            if current == total || bars.len() >= self.max_bars {
+                return;
+            }
+
+            let item_name = name.to_string();
+            let pb = self.multi.add(ProgressBar::new(total));
+            pb.set_style(
+                ProgressStyle::with_template(
+                    "[{bar:40.cyan/blue}] {bytes} / {total_bytes} ({eta}) {wide_msg:>}",
+                )
+                .unwrap(),
+            );
+            pb.set_message(item_name.clone());
+            bars.insert(item_name, pb);
+            bars.get(name).unwrap()
+        };
+
+        if current == total {
+            pb.finish_and_clear();
+            bars.remove(name);
+        } else {
+            pb.set_position(current);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     env_logger::builder()
@@ -133,19 +182,16 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
 }
 
 async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
-    static PB: OnceLock<ProgressBar> = OnceLock::new();
-    fn download_callback(name: &str, size: u64) {
-        let pb = PB.get().unwrap();
-        pb.set_message(name.to_string());
-        pb.inc(size);
+    static PROGRESS: OnceLock<ProgressManager> = OnceLock::new();
+    fn download_callback(_uuid: &Uuid, name: &str, current_size: u64, total_size: u64) {
+        PROGRESS
+            .get()
+            .unwrap()
+            .update_item(name, current_size, total_size);
     }
+
+    PROGRESS.set(ProgressManager::new()).unwrap();
     let version = Version::from_manifest(&args.manifest_path).await?;
-    let pb = ProgressBar::new(version.get_compressed_size());
-    pb.set_style(
-        ProgressStyle::with_template("[{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
-            .unwrap(),
-    );
-    PB.set(pb).unwrap();
     version
         .download_compressed(&args.output_path, Some(download_callback))
         .await

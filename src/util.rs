@@ -1,9 +1,10 @@
 use std::io::{BufRead, Write as _};
 
+use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::Error;
+use crate::{DownloadCallback, Error};
 
 pub fn get_file_hash(file_path: &str) -> Result<String, Error> {
     let file = std::fs::File::open(file_path)?;
@@ -149,17 +150,38 @@ pub fn url_encode(input: &str) -> String {
     output
 }
 
-pub async fn download_to_file(url: &str, file_path: &str) -> Result<u64, Error> {
+pub async fn download_to_file(
+    associated_uuid: Option<Uuid>,
+    url: &str,
+    file_path: &str,
+    callback: Option<DownloadCallback>,
+) -> Result<(), Error> {
+    let uuid = associated_uuid.unwrap_or(Uuid::nil());
     // If the url is a file path, copy the file instead of downloading it
     if url.starts_with("file:///") {
         let path = url.trim_start_matches("file:///");
         std::fs::copy(path, file_path)?;
+        let size = std::fs::metadata(path)?.len();
+        if let Some(callback) = callback {
+            callback(&uuid, get_file_name_without_parent(path), size, size);
+        }
     } else {
+        let file_name = get_file_name_without_parent(file_path);
         let response = reqwest::get(url).await?;
+        let total_size = response.content_length().unwrap_or(0);
         let mut file = std::fs::File::create(file_path)?;
-        std::io::copy(&mut response.bytes().await?.as_ref(), &mut file)?;
+        let mut downloaded_size = 0;
+        let mut reader = response.bytes_stream();
+        while let Some(chunk) = reader.next().await {
+            let chunk = chunk?;
+            file.write_all(&chunk)?;
+            downloaded_size += chunk.len() as u64;
+            if let Some(callback) = callback {
+                callback(&uuid, file_name, downloaded_size, total_size);
+            }
+        }
     }
-    Ok(std::fs::metadata(file_path)?.len())
+    Ok(())
 }
 
 pub fn copy_dir(from: &str, to: &str, recursive: bool) -> Result<(), Error> {
