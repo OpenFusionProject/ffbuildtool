@@ -30,7 +30,11 @@ async fn main() {
 
         let time = std::time::Instant::now();
         bundle
-            .validate_uncompressed(bundle_root.to_str().unwrap())
+            .validate_uncompressed(
+                bundle_root.to_str().unwrap(),
+                Some(version.get_uuid()),
+                None,
+            )
             .unwrap();
         info!("Validation took {:?}", time.elapsed());
     }

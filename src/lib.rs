@@ -223,7 +223,11 @@ impl Version {
     }
 
     /// Validates the uncompressed asset bundles against the metadata. Returns a list of corrupted files.
-    pub async fn validate_uncompressed(&self, path: &str) -> Result<Vec<String>, Error> {
+    pub async fn validate_uncompressed(
+        &self,
+        path: &str,
+        callback: Option<ProgressCallback>,
+    ) -> Result<Vec<String>, Error> {
         info!(
             "Validating uncompressed asset bundles for {} ({})...",
             self.uuid, path
@@ -235,8 +239,13 @@ impl Version {
             let corrupted = Arc::clone(&corrupted);
             let bundle_name_url_encoded = util::url_encode(&bundle_name);
             let folder_path = PathBuf::from(path).join(&bundle_name_url_encoded);
+            let uuid = self.uuid;
             tasks.push(tokio::spawn(async move {
-                match bundle_info.validate_uncompressed(folder_path.to_str().unwrap()) {
+                match bundle_info.validate_uncompressed(
+                    folder_path.to_str().unwrap(),
+                    Some(uuid),
+                    callback,
+                ) {
                     Ok(corrupted_files) => {
                         if !corrupted_files.is_empty() {
                             for (file_name, e) in &corrupted_files {
@@ -458,15 +467,33 @@ impl BundleInfo {
         Ok(attempts > 0)
     }
 
-    pub fn validate_uncompressed(&self, folder_path: &str) -> Result<Vec<(String, String)>, Error> {
+    pub fn validate_uncompressed(
+        &self,
+        folder_path: &str,
+        version_uuid: Option<Uuid>,
+        callback: Option<ProgressCallback>,
+    ) -> Result<Vec<(String, String)>, Error> {
+        let uuid = version_uuid.unwrap_or_default();
         let folder_path_leaf = util::get_file_name_without_parent(folder_path);
         let mut corrupted = Vec::new();
         for (file_name, file_info_good) in &self.uncompressed_info {
             let file_path = PathBuf::from(folder_path).join(file_name);
             let file_info = FileInfo::build_file(file_path.to_str().unwrap());
+            let file_id = format!("{}/{}", folder_path_leaf, file_name);
+
+            if let Some(cb) = callback {
+                cb(&uuid, &file_id, ItemProgress::Validating);
+            }
+
+            let mut result = ItemProgress::Completed;
             if let Err(e) = file_info.validate(file_info_good) {
-                let file_id = format!("{}/{}", folder_path_leaf, file_name);
-                corrupted.push((file_id, e));
+                warn!("{} invalid: {}", file_id, e);
+                corrupted.push((file_id.clone(), e));
+                result = ItemProgress::Failed;
+            }
+
+            if let Some(cb) = callback {
+                cb(&uuid, &file_id, result);
             }
         }
         Ok(corrupted)

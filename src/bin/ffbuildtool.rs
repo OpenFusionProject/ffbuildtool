@@ -268,7 +268,9 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
     );
 
     let corrupted = if args.uncompressed {
-        version.validate_uncompressed(&args.build_path).await?
+        version
+            .validate_uncompressed(&args.build_path, None)
+            .await?
     } else {
         version
             .validate_compressed(&args.build_path, Some(progress_callback))

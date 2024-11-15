@@ -38,7 +38,10 @@ async fn test_validate_uncompressed_good() {
     let manifest_path = "example_manifest.json";
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
-    let corrupted = version.validate_uncompressed(asset_root).await.unwrap();
+    let corrupted = version
+        .validate_uncompressed(asset_root, None)
+        .await
+        .unwrap();
     assert!(corrupted.is_empty());
 }
 
@@ -49,7 +52,7 @@ async fn test_validate_uncompressed_bad() {
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let corrupted = version
-        .validate_uncompressed(asset_root_bad)
+        .validate_uncompressed(asset_root_bad, None)
         .await
         .unwrap()
         .iter()
@@ -97,7 +100,11 @@ async fn test_extract_bundle() {
     let bundle_info = version.get_bundle("Map_00_00.unity3d").unwrap();
 
     let corrupted = bundle_info
-        .validate_uncompressed(output_files_dir.to_str().unwrap())
+        .validate_uncompressed(
+            output_files_dir.to_str().unwrap(),
+            Some(version.get_uuid()),
+            None,
+        )
         .unwrap();
     assert!(corrupted.is_empty());
 }

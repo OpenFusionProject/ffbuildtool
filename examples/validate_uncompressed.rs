@@ -11,13 +11,19 @@ async fn main() {
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let time = std::time::Instant::now();
-    let corrupted = version.validate_uncompressed(asset_root).await.unwrap();
+    let corrupted = version
+        .validate_uncompressed(asset_root, None)
+        .await
+        .unwrap();
     info!("Validation took {:?}", time.elapsed());
     assert!(corrupted.is_empty());
 
     let asset_root_bad = "example_builds/uncompressed/bad/";
     let time = std::time::Instant::now();
-    let corrupted = version.validate_uncompressed(asset_root_bad).await.unwrap();
+    let corrupted = version
+        .validate_uncompressed(asset_root_bad, None)
+        .await
+        .unwrap();
     info!(
         "Validation took {:?}; corrupted files: {:?}",
         time.elapsed(),
