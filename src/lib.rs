@@ -408,9 +408,8 @@ impl BundleInfo {
 
         let mut attempts = 0;
         while let Err(e) = file_info.validate(&self.compressed_info) {
-            warn!("{} failed validation: {}", file_name, e);
             let Some(url) = download_url else {
-                return Err(format!("{} failed validation: {}", file_name, e).into());
+                return Err(e.into());
             };
 
             if attempts >= MAX_DOWNLOAD_ATTEMPTS {
