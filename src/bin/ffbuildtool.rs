@@ -174,6 +174,9 @@ impl ProgressManager {
                 pb.set_length(total);
                 *st = ItemState::Downloading;
             }
+            if pb.length().unwrap_or(0) != total {
+                pb.set_length(total);
+            }
             pb.set_position(current);
         } else if bars.len() < self.max_bars {
             let pb = self.multi.add(ProgressBar::new(total));
@@ -207,6 +210,10 @@ async fn main() -> Result<(), Error> {
 }
 
 async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
+    println!(
+        "Generating manifest for build at {} with asset URL {}",
+        args.build_path, args.asset_url
+    );
     let parent_uuid: Option<Uuid> = if let Some(p) = args.parent {
         Some(Uuid::parse_str(p.as_str())?)
     } else {
@@ -220,8 +227,11 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
         parent_uuid,
     )
     .await?;
+    println!("Build UUID: {}", version.get_uuid());
 
-    version.export_manifest(&args.output_path)
+    version.export_manifest(&args.output_path)?;
+    println!("Manifest exported to {}", args.output_path);
+    Ok(())
 }
 
 async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
