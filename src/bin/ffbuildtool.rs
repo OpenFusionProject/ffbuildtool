@@ -1,13 +1,13 @@
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
+    time::Duration,
 };
 
 use clap::{Args, Parser, Subcommand};
 
 use ffbuildtool::{Error, ItemProgress, Version};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::LevelFilter;
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -99,11 +99,17 @@ struct ExtractBundleArgs {
     output_dir: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+enum ItemState {
+    Downloading,
+    Validating,
+}
+
 struct ProgressManager {
     multi: MultiProgress,
-    bars: Mutex<HashMap<String, ProgressBar>>,
+    bars: Mutex<HashMap<String, (ProgressBar, ItemState)>>,
     max_bars: usize,
+    styles: Vec<ProgressStyle>,
 }
 impl ProgressManager {
     fn new() -> Self {
@@ -111,50 +117,71 @@ impl ProgressManager {
             multi: MultiProgress::new(),
             bars: Mutex::new(HashMap::new()),
             max_bars: 10,
+            styles: vec![
+                ProgressStyle::default_bar()
+                    .template("[{bar:40.cyan/blue}] {bytes} / {total_bytes} ({eta}) {wide_msg:>}")
+                    .unwrap(),
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.green} Validating {wide_msg:>}")
+                    .unwrap(),
+            ],
         }
     }
 
     fn update_item(&self, name: &str, progress: ItemProgress) {
         match progress {
             ItemProgress::Downloading(current, total) => {
-                self.update_item_download(name, current, total);
+                self.update_item_downloading(name, current, total);
             }
-            ItemProgress::Completed => {
+            ItemProgress::Validating => {
+                self.update_item_validating(name);
+            }
+            ItemProgress::Completed | ItemProgress::Failed => {
                 self.finish_item(name);
             }
-            _ => {}
         }
     }
 
     fn finish_item(&self, name: &str) {
         let mut bars = self.bars.lock().unwrap();
-        if let Some(pb) = bars.remove(name) {
+        if let Some((pb, _)) = bars.remove(name) {
             pb.finish_and_clear();
         }
     }
 
-    fn update_item_download(&self, name: &str, current: u64, total: u64) {
+    fn update_item_validating(&self, name: &str) {
         let mut bars = self.bars.lock().unwrap();
-        let pb = if let Some(pb) = bars.get(name) {
-            pb
-        } else {
-            if current == total || bars.len() >= self.max_bars {
-                return;
+        if let Some((pb, st)) = bars.get_mut(name) {
+            if *st != ItemState::Validating {
+                pb.set_style(self.styles[1].clone());
+                *st = ItemState::Validating;
             }
-
-            let item_name = name.to_string();
-            let pb = self.multi.add(ProgressBar::new(total));
-            pb.set_style(
-                ProgressStyle::with_template(
-                    "[{bar:40.cyan/blue}] {bytes} / {total_bytes} ({eta}) {wide_msg:>}",
-                )
-                .unwrap(),
-            );
-            pb.set_message(item_name.clone());
-            bars.insert(item_name, pb);
-            bars.get(name).unwrap()
+        } else if bars.len() < self.max_bars {
+            let pb = self.multi.add(ProgressBar::new(0));
+            pb.set_style(self.styles[1].clone());
+            pb.set_message(name.to_string());
+            pb.enable_steady_tick(Duration::from_millis(100));
+            bars.insert(name.to_string(), (pb, ItemState::Validating));
         };
-        pb.set_position(current);
+    }
+
+    fn update_item_downloading(&self, name: &str, current: u64, total: u64) {
+        let mut bars = self.bars.lock().unwrap();
+        if let Some((pb, st)) = bars.get_mut(name) {
+            if *st != ItemState::Downloading {
+                pb.disable_steady_tick();
+                pb.set_style(self.styles[0].clone());
+                pb.set_length(total);
+                *st = ItemState::Downloading;
+            }
+            pb.set_position(current);
+        } else if bars.len() < self.max_bars {
+            let pb = self.multi.add(ProgressBar::new(total));
+            pb.set_style(self.styles[0].clone());
+            pb.set_message(name.to_string());
+            pb.set_position(current);
+            bars.insert(name.to_string(), (pb, ItemState::Downloading));
+        };
     }
 }
 
@@ -165,13 +192,9 @@ fn progress_callback(_uuid: &Uuid, name: &str, progress: ItemProgress) {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    env_logger::builder()
-        .format_timestamp(None)
-        .filter_level(LevelFilter::Info)
-        .init();
-
-    PROGRESS.set(ProgressManager::new()).unwrap();
-
+    PROGRESS
+        .set(ProgressManager::new())
+        .unwrap_or_else(|_| panic!());
     let args = Cli::parse();
     match args.command {
         Commands::GenManifest(args) => generate_manifest(args).await,
@@ -203,13 +226,25 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
 
 async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
     let version = Version::from_manifest(&args.manifest_path).await?;
+    println!(
+        "Downloading build {} to {}",
+        version.get_uuid(),
+        args.output_path
+    );
     version
         .download_compressed(&args.output_path, Some(progress_callback))
-        .await
+        .await?;
+    println!("Download complete");
+    Ok(())
 }
 
 async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
     let version = Version::from_manifest(&args.manifest_path).await?;
+    println!(
+        "Repairing build {} at {}",
+        version.get_uuid(),
+        args.build_path
+    );
     let corrupted = version
         .repair(&args.build_path, Some(progress_callback))
         .await?;
@@ -226,10 +261,18 @@ async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
 
 async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
     let version = Version::from_manifest(&args.manifest_path).await?;
+    println!(
+        "Validating build {} at {}",
+        version.get_uuid(),
+        args.build_path
+    );
+
     let corrupted = if args.uncompressed {
         version.validate_uncompressed(&args.build_path).await?
     } else {
-        version.validate_compressed(&args.build_path).await?
+        version
+            .validate_compressed(&args.build_path, Some(progress_callback))
+            .await?
     };
 
     if corrupted.is_empty() {
@@ -246,7 +289,10 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
 #[cfg(feature = "lzma")]
 async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), Error> {
     use ffbuildtool::bundle::AssetBundle;
-
+    println!(
+        "Extracting bundle {} to {}",
+        args.bundle_path, args.output_dir
+    );
     let asset_bundle = AssetBundle::from_file(&args.bundle_path)?;
     asset_bundle.extract_files(&args.output_dir)
 }

@@ -12,7 +12,10 @@ async fn test_validate_compressed_good() {
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let asset_root_good = "example_builds/compressed/good/";
-    let corrupted = version.validate_compressed(asset_root_good).await.unwrap();
+    let corrupted = version
+        .validate_compressed(asset_root_good, None)
+        .await
+        .unwrap();
     assert!(corrupted.is_empty());
 }
 
@@ -22,7 +25,10 @@ async fn test_validate_compressed_bad() {
     let version = Version::from_manifest_file(manifest_path).unwrap();
 
     let asset_root_bad = "example_builds/compressed/bad/";
-    let corrupted = version.validate_compressed(asset_root_bad).await.unwrap();
+    let corrupted = version
+        .validate_compressed(asset_root_bad, None)
+        .await
+        .unwrap();
     assert_eq!(corrupted, vec!["Map_00_00.unity3d"]);
 }
 
@@ -72,7 +78,7 @@ async fn test_generate_manifest() {
     version.uuid = example_version.uuid;
     assert_eq!(version, example_version);
 
-    let corrupted = version.validate_compressed(asset_root).await.unwrap();
+    let corrupted = version.validate_compressed(asset_root, None).await.unwrap();
     assert!(corrupted.is_empty());
 }
 

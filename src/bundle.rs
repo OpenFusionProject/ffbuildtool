@@ -140,10 +140,12 @@ impl AssetBundle {
 
         let files = self.get_file_entries()?;
         for file in files {
-            let file_id = format!("{}/{}", output_dir, file.name);
+            let file_id = format!("{}{}", output_dir, file.name);
             let path = path.join(&file.name);
             if let Err(e) = std::fs::write(&path, &file.data) {
                 warn!("Failed to write {}: {}", file_id, e);
+            } else {
+                info!("Extracted {}", file_id);
             }
         }
         Ok(())

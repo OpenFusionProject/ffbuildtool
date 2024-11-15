@@ -28,6 +28,7 @@ pub enum ItemProgress {
     Downloading(u64, u64), // bytes downloaded, total bytes
     Validating,
     Completed,
+    Failed,
 }
 pub type ProgressCallback = fn(&Uuid, &str, ItemProgress); // uuid, item name, progress
 
@@ -67,14 +68,17 @@ impl Version {
         self.uuid
     }
 
+    /// Returns the total size of the build in bytes, including the main file.
     pub fn get_total_compressed_size(&self) -> u64 {
         self.main_file_info.size + self.asset_info.total_compressed_size
     }
 
+    /// Returns the total size of the compressed asset bundles in bytes.
     pub fn get_compressed_assets_size(&self) -> u64 {
         self.asset_info.total_compressed_size
     }
 
+    /// Returns the total size of the uncompressed asset bundles in bytes.
     pub fn get_uncompressed_assets_size(&self) -> u64 {
         self.asset_info.total_uncompressed_size
     }
@@ -128,10 +132,17 @@ impl Version {
     }
 
     /// Validates the compressed asset bundles against the metadata. Returns a list of corrupted bundles.
-    pub async fn validate_compressed(&self, path: &str) -> Result<Vec<String>, Error> {
-        self.validate_compressed_internal(path, false, None).await
+    pub async fn validate_compressed(
+        &self,
+        path: &str,
+        callback: Option<ProgressCallback>,
+    ) -> Result<Vec<String>, Error> {
+        self.validate_compressed_internal(path, false, callback)
+            .await
     }
 
+    /// Validates the compressed asset bundles against the metadata. Returns a list of corrupted bundles.
+    /// If `download_failed_bundles` is true, corrupted bundles will be re-downloaded.  
     async fn validate_compressed_internal(
         &self,
         path: &str,
@@ -273,6 +284,9 @@ impl Version {
         path: &str,
         callback: Option<ProgressCallback>,
     ) -> Result<Vec<String>, Error> {
+        if !std::fs::exists(path).unwrap_or(false) {
+            return Err(format!("Path does not exist: {}", path).into());
+        }
         let uuid = self.uuid;
         info!("Repairing build {} at {}", uuid, path);
         let corrupted = self
@@ -400,19 +414,28 @@ impl BundleInfo {
         const MAX_DOWNLOAD_ATTEMPTS: usize = 5;
         let file_name = util::get_file_name_without_parent(file_path);
         let mut file_info = FileInfo::build_file(file_path);
-
-        if let Some(cb) = callback {
-            let uuid = version_uuid.unwrap_or_default();
-            cb(&uuid, file_name, ItemProgress::Validating);
-        }
-
         let mut attempts = 0;
-        while let Err(e) = file_info.validate(&self.compressed_info) {
+        while let Err(e) = {
+            if let Some(cb) = callback {
+                let uuid = version_uuid.unwrap_or_default();
+                cb(&uuid, file_name, ItemProgress::Validating);
+            }
+            file_info.validate(&self.compressed_info)
+        } {
+            warn!("{} invalid", file_name);
             let Some(url) = download_url else {
+                if let Some(cb) = callback {
+                    let uuid = version_uuid.unwrap_or_default();
+                    cb(&uuid, file_name, ItemProgress::Failed);
+                }
                 return Err(e.into());
             };
 
             if attempts >= MAX_DOWNLOAD_ATTEMPTS {
+                if let Some(cb) = callback {
+                    let uuid = version_uuid.unwrap_or_default();
+                    cb(&uuid, file_name, ItemProgress::Failed);
+                }
                 return Err(format!(
                     "Failed to download {} after {} attempts: {}",
                     file_path, attempts, e
@@ -426,6 +449,11 @@ impl BundleInfo {
                 file_info = FileInfo::build_file(file_path);
             }
             attempts += 1;
+        }
+
+        if let Some(cb) = callback {
+            let uuid = version_uuid.unwrap_or_default();
+            cb(&uuid, file_name, ItemProgress::Completed);
         }
         Ok(attempts > 0)
     }

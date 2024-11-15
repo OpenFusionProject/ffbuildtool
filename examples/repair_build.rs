@@ -29,6 +29,6 @@ async fn main() {
     version.repair(new_path, None).await.unwrap();
     info!("Repairing took {:?}", time.elapsed());
 
-    let corrupted = version.validate_compressed(new_path).await.unwrap();
+    let corrupted = version.validate_compressed(new_path, None).await.unwrap();
     assert!(corrupted.is_empty());
 }
