@@ -136,7 +136,7 @@ impl ProgressManager {
             ItemProgress::Validating => {
                 self.update_item_validating(name);
             }
-            ItemProgress::Completed | ItemProgress::Failed => {
+            ItemProgress::Completed(_) | ItemProgress::Failed => {
                 self.finish_item(name);
             }
         }

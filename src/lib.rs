@@ -27,7 +27,7 @@ mod tests;
 pub enum ItemProgress {
     Downloading(u64, u64), // bytes downloaded, total bytes
     Validating,
-    Completed,
+    Completed(u64), // total bytes
     Failed,
 }
 pub type ProgressCallback = fn(&Uuid, &str, ItemProgress); // uuid, item name, progress
@@ -462,7 +462,11 @@ impl BundleInfo {
 
         if let Some(cb) = callback {
             let uuid = version_uuid.unwrap_or_default();
-            cb(&uuid, file_name, ItemProgress::Completed);
+            cb(
+                &uuid,
+                file_name,
+                ItemProgress::Completed(self.compressed_info.size),
+            );
         }
         Ok(attempts > 0)
     }
@@ -485,7 +489,7 @@ impl BundleInfo {
                 cb(&uuid, &file_id, ItemProgress::Validating);
             }
 
-            let mut result = ItemProgress::Completed;
+            let mut result = ItemProgress::Completed(file_info_good.size);
             if let Err(e) = file_info.validate(file_info_good) {
                 warn!("{} invalid: {}", file_id, e);
                 corrupted.push((file_id.clone(), e));
