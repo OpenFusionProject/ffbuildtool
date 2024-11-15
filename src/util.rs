@@ -1,10 +1,12 @@
 use std::io::{BufRead, Write as _};
 
 use futures_util::StreamExt;
+use log::*;
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt as _;
 use uuid::Uuid;
 
-use crate::{DownloadCallback, Error};
+use crate::{Error, ItemProgress, ProgressCallback};
 
 pub fn get_file_hash(file_path: &str) -> Result<String, Error> {
     let file = std::fs::File::open(file_path)?;
@@ -158,30 +160,38 @@ pub async fn download_to_file(
     associated_uuid: Option<Uuid>,
     url: &str,
     file_path: &str,
-    callback: Option<DownloadCallback>,
+    callback: Option<ProgressCallback>,
 ) -> Result<(), Error> {
+    info!("Downloading {} to {}", url, file_path);
+
     let uuid = associated_uuid.unwrap_or(Uuid::nil());
+    let file_name = get_file_name_without_parent(file_path);
+    let mut file = tokio::fs::File::create(file_path).await?;
+
     // If the url is a file path, copy the file instead of downloading it
     if url.starts_with("file:///") {
         let path = url.trim_start_matches("file:///");
-        std::fs::copy(path, file_path)?;
         let size = std::fs::metadata(path)?.len();
         if let Some(callback) = callback {
-            callback(&uuid, get_file_name_without_parent(path), size, size);
+            callback(&uuid, file_name, ItemProgress::Downloading(0, size));
+        }
+        let reader = tokio::fs::read(path).await?;
+        file.write_all(&reader).await?;
+        if let Some(callback) = callback {
+            callback(&uuid, file_name, ItemProgress::Downloading(size, size));
         }
     } else {
-        let file_name = get_file_name_without_parent(file_path);
         let response = reqwest::get(url).await?;
         let total_size = response.content_length().unwrap_or(0);
-        let mut file = std::fs::File::create(file_path)?;
         let mut downloaded_size = 0;
-        let mut reader = response.bytes_stream();
-        while let Some(chunk) = reader.next().await {
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
-            file.write_all(&chunk)?;
+            file.write_all(&chunk).await?;
             downloaded_size += chunk.len() as u64;
+            let progress = ItemProgress::Downloading(downloaded_size, total_size);
             if let Some(callback) = callback {
-                callback(&uuid, file_name, downloaded_size, total_size);
+                callback(&uuid, file_name, progress);
             }
         }
     }

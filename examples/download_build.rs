@@ -1,15 +1,17 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ffbuildtool::Version;
+use ffbuildtool::{ItemProgress, Version};
 
 use log::*;
 use uuid::Uuid;
 
 static TOTAL_DOWNLOAD_SIZE: AtomicU64 = AtomicU64::new(0);
 
-fn download_callback(_uuid: &Uuid, _name: &str, current_size: u64, total_size: u64) {
-    if current_size == total_size {
-        TOTAL_DOWNLOAD_SIZE.fetch_add(current_size, Ordering::SeqCst);
+fn progress_callback(_uuid: &Uuid, _name: &str, progress: ItemProgress) {
+    if let ItemProgress::Downloading(current_size, total_size) = progress {
+        if current_size == total_size {
+            TOTAL_DOWNLOAD_SIZE.fetch_add(current_size, Ordering::SeqCst);
+        }
     }
 }
 
@@ -22,7 +24,7 @@ async fn main() {
 
     let time = std::time::Instant::now();
     version
-        .download_compressed(output_path, Some(download_callback))
+        .download_compressed(output_path, Some(progress_callback))
         .await
         .unwrap();
     info!("Downloading and validation took {:?}", time.elapsed());

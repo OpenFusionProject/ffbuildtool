@@ -5,7 +5,7 @@ use std::{
 
 use clap::{Args, Parser, Subcommand};
 
-use ffbuildtool::{Error, Version};
+use ffbuildtool::{Error, ItemProgress, Version};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::LevelFilter;
 use uuid::Uuid;
@@ -114,7 +114,26 @@ impl ProgressManager {
         }
     }
 
-    fn update_item(&self, name: &str, current: u64, total: u64) {
+    fn update_item(&self, name: &str, progress: ItemProgress) {
+        match progress {
+            ItemProgress::Downloading(current, total) => {
+                self.update_item_download(name, current, total);
+            }
+            ItemProgress::Completed => {
+                self.finish_item(name);
+            }
+            _ => {}
+        }
+    }
+
+    fn finish_item(&self, name: &str) {
+        let mut bars = self.bars.lock().unwrap();
+        if let Some(pb) = bars.remove(name) {
+            pb.finish_and_clear();
+        }
+    }
+
+    fn update_item_download(&self, name: &str, current: u64, total: u64) {
         let mut bars = self.bars.lock().unwrap();
         let pb = if let Some(pb) = bars.get(name) {
             pb
@@ -135,14 +154,13 @@ impl ProgressManager {
             bars.insert(item_name, pb);
             bars.get(name).unwrap()
         };
-
-        if current == total {
-            pb.finish_and_clear();
-            bars.remove(name);
-        } else {
-            pb.set_position(current);
-        }
+        pb.set_position(current);
     }
+}
+
+static PROGRESS: OnceLock<ProgressManager> = OnceLock::new();
+fn progress_callback(_uuid: &Uuid, name: &str, progress: ItemProgress) {
+    PROGRESS.get().unwrap().update_item(name, progress);
 }
 
 #[tokio::main]
@@ -151,6 +169,8 @@ async fn main() -> Result<(), Error> {
         .format_timestamp(None)
         .filter_level(LevelFilter::Info)
         .init();
+
+    PROGRESS.set(ProgressManager::new()).unwrap();
 
     let args = Cli::parse();
     match args.command {
@@ -182,24 +202,17 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
 }
 
 async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
-    static PROGRESS: OnceLock<ProgressManager> = OnceLock::new();
-    fn download_callback(_uuid: &Uuid, name: &str, current_size: u64, total_size: u64) {
-        PROGRESS
-            .get()
-            .unwrap()
-            .update_item(name, current_size, total_size);
-    }
-
-    PROGRESS.set(ProgressManager::new()).unwrap();
     let version = Version::from_manifest(&args.manifest_path).await?;
     version
-        .download_compressed(&args.output_path, Some(download_callback))
+        .download_compressed(&args.output_path, Some(progress_callback))
         .await
 }
 
 async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
     let version = Version::from_manifest(&args.manifest_path).await?;
-    let corrupted = version.repair(&args.build_path).await?;
+    let corrupted = version
+        .repair(&args.build_path, Some(progress_callback))
+        .await?;
     if corrupted.is_empty() {
         println!("No corrupted files found");
     } else {

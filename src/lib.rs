@@ -1,7 +1,10 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use bundle::AssetBundle;
@@ -13,13 +16,20 @@ use uuid::Uuid;
 use log::*;
 
 pub type Error = Box<dyn std::error::Error>;
-pub type DownloadCallback = fn(&Uuid, &str, u64, u64); // uuid, item name, current size, total size
 
 pub mod bundle;
 pub mod util;
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Debug)]
+pub enum ItemProgress {
+    Downloading(u64, u64), // bytes downloaded, total bytes
+    Validating,
+    Completed,
+}
+pub type ProgressCallback = fn(&Uuid, &str, ItemProgress); // uuid, item name, progress
 
 /// Contains all the info comprising a FusionFall build.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -69,6 +79,15 @@ impl Version {
         self.asset_info.total_uncompressed_size
     }
 
+    /// Returns the asset URL for the build without a trailing slash.
+    pub fn get_asset_url(&self) -> String {
+        let mut url = self.asset_info.asset_url.clone();
+        if url.ends_with('/') {
+            url.pop();
+        }
+        url
+    }
+
     /// Overrides the asset URL for the build. Useful for testing.
     pub fn set_asset_url(&mut self, asset_url: &str) {
         self.asset_info.asset_url = asset_url.to_string();
@@ -110,24 +129,70 @@ impl Version {
 
     /// Validates the compressed asset bundles against the metadata. Returns a list of corrupted bundles.
     pub async fn validate_compressed(&self, path: &str) -> Result<Vec<String>, Error> {
+        self.validate_compressed_internal(path, false, None).await
+    }
+
+    async fn validate_compressed_internal(
+        &self,
+        path: &str,
+        download_failed_bundles: bool,
+        callback: Option<ProgressCallback>,
+    ) -> Result<Vec<String>, Error> {
         info!(
             "Validating compressed asset bundles for {} ({})...",
             self.uuid, path
         );
+
+        let get_path =
+            |name: &str| -> String { PathBuf::from(path).join(name).to_str().unwrap().to_string() };
+
+        info!("Checking main file");
+        let main_bundle_info: BundleInfo = self.main_file_info.clone().into();
+        let main_file_path = get_path("main.unity3d");
+        let main_file_url = match download_failed_bundles {
+            false => None,
+            true => Some(format!("{}/main.unity3d", self.get_asset_url())),
+        };
+        main_bundle_info
+            .validate_compressed(
+                &main_file_path,
+                Some(self.uuid),
+                main_file_url.as_deref(),
+                callback,
+            )
+            .await?;
+
+        info!("Checking asset bundles");
         let bundles = self.asset_info.bundles.clone();
+        let repair_count = Arc::new(AtomicU64::new(0));
         let corrupted = Arc::new(Mutex::new(Vec::new()));
         let mut tasks = Vec::with_capacity(bundles.len());
         for (bundle_name, bundle_info) in bundles {
-            let file_path = PathBuf::from(path)
-                .join(&bundle_name)
-                .to_str()
-                .unwrap()
-                .to_string();
+            let file_path = get_path(&bundle_name);
+            let repair_count = Arc::clone(&repair_count);
             let corrupted = Arc::clone(&corrupted);
+            let url = match download_failed_bundles {
+                false => None,
+                true => Some(format!("{}/{}", self.get_asset_url(), bundle_name)),
+            };
+            let uuid = self.uuid;
             tasks.push(tokio::spawn(async move {
-                if let Err(e) = bundle_info.validate_compressed(&file_path) {
-                    warn!("{} failed validation: {}", bundle_name, e);
-                    corrupted.lock().unwrap().push(bundle_name);
+                match bundle_info
+                    .validate_compressed(&file_path, Some(uuid), url.as_deref(), callback)
+                    .await
+                {
+                    Ok(true) => {
+                        info!("{} repaired", bundle_name);
+                        corrupted.lock().unwrap().push(bundle_name);
+                        repair_count.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Ok(false) => {
+                        debug!("{} validated", bundle_name);
+                    }
+                    Err(e) => {
+                        warn!("{} failed validation: {}", bundle_name, e);
+                        corrupted.lock().unwrap().push(bundle_name);
+                    }
                 }
             }));
         }
@@ -136,8 +201,13 @@ impl Version {
             task.await?;
         }
 
+        let repair_count = repair_count.load(Ordering::SeqCst);
         let corrupted = Arc::try_unwrap(corrupted).unwrap().into_inner().unwrap();
-        info!("Validation complete; {} corrupted bundles", corrupted.len());
+        info!(
+            "Validation complete; {}/{} missing or corrupted bundles repaired",
+            repair_count,
+            corrupted.len()
+        );
         Ok(corrupted)
     }
 
@@ -187,98 +257,27 @@ impl Version {
     pub async fn download_compressed(
         &self,
         path: &str,
-        callback: Option<DownloadCallback>,
+        callback: Option<ProgressCallback>,
     ) -> Result<(), Error> {
-        let uuid = self.uuid;
-        let path = PathBuf::from(path).join(self.uuid.to_string());
-        info!(
-            "Downloading build {} to {}",
-            self.uuid,
-            path.to_str().unwrap()
-        );
-        std::fs::create_dir_all(&path)?;
-
-        // download and validate main file
-        info!("Downloading main file...");
-        let main_file_path = path.join("main.unity3d").to_str().unwrap().to_string();
-        util::download_to_file(Some(uuid), &self.main_file_url, &main_file_path, callback).await?;
-        let main_file_info = FileInfo::build_file(&main_file_path).unwrap();
-        info!("Validating main file...");
-        main_file_info.validate(&self.main_file_info)?;
-
-        let bundle_names = self.asset_info.bundles.keys().cloned();
-        let mut tasks: Vec<tokio::task::JoinHandle<Result<(), String>>> =
-            Vec::with_capacity(bundle_names.len());
-        info!("Downloading assets...");
-        for bundle_name in bundle_names {
-            let file_url = format!("{}/{}", self.asset_info.asset_url, bundle_name);
-            let file_path = path.join(&bundle_name).to_str().unwrap().to_string();
-            tasks.push(tokio::spawn(async move {
-                util::download_to_file(Some(uuid), &file_url, &file_path, callback)
-                    .await
-                    .map_err(|e| format!("Failed to download {}: {}", file_url, e))?;
-                debug!("Downloaded {}", file_url);
-                Ok(())
-            }));
-        }
-
-        for task in tasks {
-            if let Err(e) = task.await? {
-                return Err(e.into());
-            }
-        }
+        info!("Downloading build {} to {}", self.uuid, path,);
+        let _ = std::fs::remove_dir_all(path);
+        std::fs::create_dir_all(path)?;
+        self.repair(path, callback).await?;
         info!("Download complete");
-
-        let corrupted = self.validate_compressed(path.to_str().unwrap()).await?;
-        if !corrupted.is_empty() {
-            return Err(format!(
-                "Download failed, {} bundles could not be validated: {:?}",
-                corrupted.len(),
-                corrupted
-            )
-            .into());
-        }
-
         Ok(())
     }
 
     /// Repairs the build by re-downloading corrupted asset bundles.
-    pub async fn repair(&self, path: &str) -> Result<Vec<String>, Error> {
+    pub async fn repair(
+        &self,
+        path: &str,
+        callback: Option<ProgressCallback>,
+    ) -> Result<Vec<String>, Error> {
         let uuid = self.uuid;
         info!("Repairing build {} at {}", uuid, path);
-        let corrupted = self.validate_compressed(path).await?;
-        info!("{} corrupted bundles: {:?}", corrupted.len(), corrupted);
-
-        let mut tasks: Vec<JoinHandle<Result<(), String>>> = Vec::with_capacity(corrupted.len());
-        for bundle_name in corrupted.clone() {
-            let url = format!("{}/{}", self.asset_info.asset_url, bundle_name);
-            let bundle_info = self.get_bundle(&bundle_name).unwrap().clone();
-            let file_path = PathBuf::from(path)
-                .join(&bundle_name)
-                .to_str()
-                .unwrap()
-                .to_string();
-            tasks.push(tokio::spawn(async move {
-                if std::fs::exists(&file_path).is_ok_and(|exists| exists) {
-                    std::fs::remove_file(&file_path).map_err(|e| e.to_string())?;
-                }
-                util::download_to_file(Some(uuid), &url, &file_path, None)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                bundle_info
-                    .validate_compressed(&file_path)
-                    .map_err(|e| e.to_string())?;
-                debug!("Repaired {}", bundle_name);
-                Ok(())
-            }));
-        }
-
-        for task in tasks {
-            if let Err(e) = task.await? {
-                return Err(e.into());
-            }
-        }
-
+        let corrupted = self
+            .validate_compressed_internal(path, true, callback)
+            .await?;
         info!("Repair complete");
         Ok(corrupted)
     }
@@ -347,6 +346,14 @@ pub struct BundleInfo {
     compressed_info: FileInfo,
     uncompressed_info: HashMap<String, FileInfo>,
 }
+impl From<FileInfo> for BundleInfo {
+    fn from(compressed_info: FileInfo) -> Self {
+        Self {
+            compressed_info,
+            uncompressed_info: HashMap::new(),
+        }
+    }
+}
 impl BundleInfo {
     async fn build(asset_root: &str, bundle_name: &str) -> Result<Self, Error> {
         let file_path = format!("{}/{}", asset_root, bundle_name);
@@ -378,10 +385,50 @@ impl BundleInfo {
         self.uncompressed_info.values().map(|info| info.size).sum()
     }
 
-    pub fn validate_compressed(&self, file_path: &str) -> Result<(), Error> {
-        let file_info = FileInfo::build_file(file_path)?;
-        file_info.validate(&self.compressed_info)?;
-        Ok(())
+    /// Validates the compressed asset bundle against the metadata.
+    /// If the file is valid, the function returns `Ok(false)`.
+    /// If the file fails validation, it will be re-downloaded up to `MAX_DOWNLOAD_ATTEMPTS` times.
+    /// If the file was successfully re-downloaded, the function returns `Ok(true)`.
+    /// If the file is still corrupted after the maximum number of attempts, an error will be returned.
+    pub async fn validate_compressed(
+        &self,
+        file_path: &str,
+        version_uuid: Option<Uuid>,
+        download_url: Option<&str>,
+        callback: Option<ProgressCallback>,
+    ) -> Result<bool, Error> {
+        const MAX_DOWNLOAD_ATTEMPTS: usize = 5;
+        let file_name = util::get_file_name_without_parent(file_path);
+        let mut file_info = FileInfo::build_file(file_path);
+
+        if let Some(cb) = callback {
+            let uuid = version_uuid.unwrap_or_default();
+            cb(&uuid, file_name, ItemProgress::Validating);
+        }
+
+        let mut attempts = 0;
+        while let Err(e) = file_info.validate(&self.compressed_info) {
+            warn!("{} failed validation: {}", file_name, e);
+            let Some(url) = download_url else {
+                return Err(format!("{} failed validation: {}", file_name, e).into());
+            };
+
+            if attempts >= MAX_DOWNLOAD_ATTEMPTS {
+                return Err(format!(
+                    "Failed to download {} after {} attempts: {}",
+                    file_path, attempts, e
+                )
+                .into());
+            }
+
+            if let Err(e) = util::download_to_file(version_uuid, url, file_path, callback).await {
+                warn!("Failed to download {}: {}", file_path, e);
+            } else {
+                file_info = FileInfo::build_file(file_path);
+            }
+            attempts += 1;
+        }
+        Ok(attempts > 0)
     }
 
     pub fn validate_uncompressed(&self, folder_path: &str) -> Result<Vec<(String, String)>, Error> {
@@ -389,7 +436,7 @@ impl BundleInfo {
         let mut corrupted = Vec::new();
         for (file_name, file_info_good) in &self.uncompressed_info {
             let file_path = PathBuf::from(folder_path).join(file_name);
-            let file_info = FileInfo::build_file(file_path.to_str().unwrap())?;
+            let file_info = FileInfo::build_file(file_path.to_str().unwrap());
             if let Err(e) = file_info.validate(file_info_good) {
                 let file_id = format!("{}/{}", folder_path_leaf, file_name);
                 corrupted.push((file_id, e));
@@ -399,7 +446,7 @@ impl BundleInfo {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct FileInfo {
     hash: String,
     size: u64,
@@ -409,23 +456,24 @@ impl FileInfo {
         if uri.starts_with("http") {
             Self::build_http(uri).await
         } else {
-            Self::build_file(uri)
+            Ok(Self::build_file(uri))
         }
     }
 
     async fn build_http(url: &str) -> Result<Self, Error> {
         info!("Fetching {}", url);
         let temp_file = TempFile::download(url).await?;
-        Self::build_file(temp_file.path())
+        Ok(Self::build_file(temp_file.path()))
     }
 
-    fn build_file(file_path: &str) -> Result<Self, Error> {
+    fn build_file(file_path: &str) -> Self {
         let build_file_internal = || -> Result<Self, Error> {
             let hash = util::get_file_hash(file_path)?;
             let size = std::fs::metadata(file_path)?.len();
             Ok(Self { hash, size })
         };
-        build_file_internal().map_err(|_| format!("File not found: {}", file_path).into())
+        // if we can't access the file, assume it's corrupt
+        build_file_internal().unwrap_or_default()
     }
 
     #[cfg(feature = "lzma")]

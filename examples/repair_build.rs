@@ -26,7 +26,7 @@ async fn main() {
     util::copy_dir(build_path, new_path, true).unwrap();
 
     let time = std::time::Instant::now();
-    version.repair(new_path).await.unwrap();
+    version.repair(new_path, None).await.unwrap();
     info!("Repairing took {:?}", time.elapsed());
 
     let corrupted = version.validate_compressed(new_path).await.unwrap();
