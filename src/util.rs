@@ -168,6 +168,10 @@ pub async fn download_to_file(
     let file_name = get_file_name_without_parent(file_path);
     let mut file = tokio::fs::File::create(file_path).await?;
 
+    if let Some(callback) = callback {
+        callback(&uuid, file_name, ItemProgress::Downloading(0, 0));
+    }
+
     // If the url is a file path, copy the file instead of downloading it
     if url.starts_with("file:///") {
         let path = url.trim_start_matches("file:///");
@@ -183,6 +187,10 @@ pub async fn download_to_file(
     } else {
         let response = reqwest::get(url).await?;
         let total_size = response.content_length().unwrap_or(0);
+        if let Some(callback) = callback {
+            callback(&uuid, file_name, ItemProgress::Downloading(0, total_size));
+        }
+
         let mut downloaded_size = 0;
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
