@@ -39,7 +39,7 @@ pub struct Version {
     description: Option<String>,
     parent_uuid: Option<Uuid>,
     main_file_url: String,
-    main_file_info: FileInfo,
+    main_file_info: Option<FileInfo>,
     asset_info: AssetInfo,
 }
 impl Version {
@@ -51,7 +51,7 @@ impl Version {
         parent: Option<Uuid>,
     ) -> Result<Self, Error> {
         let main_path = format!("{}main.unity3d", asset_root);
-        let main_file_info = FileInfo::build(&main_path).await?;
+        let main_file_info = FileInfo::build(&main_path).await.ok();
         let asset_info = AssetInfo::build(asset_root, asset_url).await?;
         let main_file_url = format!("{}main.unity3d", asset_url);
         Ok(Self {
@@ -70,7 +70,7 @@ impl Version {
 
     /// Returns the total size of the build in bytes, including the main file.
     pub fn get_total_compressed_size(&self) -> u64 {
-        self.main_file_info.size + self.asset_info.total_compressed_size
+        self.main_file_info.clone().unwrap_or_default().size + self.asset_info.total_compressed_size
     }
 
     /// Returns the total size of the compressed asset bundles in bytes.
@@ -157,21 +157,23 @@ impl Version {
         let get_path =
             |name: &str| -> String { PathBuf::from(path).join(name).to_str().unwrap().to_string() };
 
-        info!("Checking main file");
-        let main_bundle_info: BundleInfo = self.main_file_info.clone().into();
-        let main_file_path = get_path("main.unity3d");
-        let main_file_url = match download_failed_bundles {
-            false => None,
-            true => Some(format!("{}/main.unity3d", self.get_asset_url())),
-        };
-        main_bundle_info
-            .validate_compressed(
-                &main_file_path,
-                Some(self.uuid),
-                main_file_url.as_deref(),
-                callback,
-            )
-            .await?;
+        if let Some(main_file_info) = self.main_file_info.clone() {
+            info!("Checking main file");
+            let main_bundle_info: BundleInfo = main_file_info.into();
+            let main_file_path = get_path("main.unity3d");
+            let main_file_url = match download_failed_bundles {
+                false => None,
+                true => Some(format!("{}/main.unity3d", self.get_asset_url())),
+            };
+            main_bundle_info
+                .validate_compressed(
+                    &main_file_path,
+                    Some(self.uuid),
+                    main_file_url.as_deref(),
+                    callback,
+                )
+                .await?;
+        }
 
         info!("Checking asset bundles");
         let bundles = self.asset_info.bundles.clone();
