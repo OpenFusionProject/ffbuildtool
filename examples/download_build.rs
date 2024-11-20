@@ -30,7 +30,9 @@ async fn main() {
     info!("Downloading and validation took {:?}", time.elapsed());
 
     let total_downloaded = TOTAL_DOWNLOAD_SIZE.load(Ordering::SeqCst);
-    assert!(version.get_total_compressed_size() == total_downloaded);
+
+    // failed downloads may add up to the total download size
+    assert!(version.get_total_compressed_size() <= total_downloaded);
     info!(
         "Total download size: {:.2} MB",
         total_downloaded as f64 / 1024.0 / 1024.0
