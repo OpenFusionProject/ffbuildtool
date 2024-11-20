@@ -33,7 +33,7 @@ pub enum ItemProgress {
 pub type ProgressCallback = fn(&Uuid, &str, ItemProgress); // uuid, item name, progress
 
 /// Contains all the info comprising a FusionFall build.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Version {
     uuid: Uuid,
     description: Option<String>,
@@ -321,7 +321,7 @@ impl Version {
 }
 
 /// Contains the info for each asset bundle in the build.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 struct AssetInfo {
     asset_url: String,
     total_compressed_size: Option<u64>,
