@@ -33,6 +33,9 @@ required-features = ["cli"]
 name = "gen_manifest"
 
 [[example]]
+name = "gen_bare"
+
+[[example]]
 name = "validate_compressed"
 
 [[example]]

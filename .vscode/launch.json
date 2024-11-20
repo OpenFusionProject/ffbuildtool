@@ -70,6 +70,28 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug example 'gen_bare'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=gen_bare",
+                    "--package=ffbuildtool"
+                ],
+                "filter": {
+                    "name": "gen_bare",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "env": {
+                "RUST_LOG": "debug",
+                "RUST_LOG_STYLE": "always"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug example 'validate_compressed'",
             "cargo": {
                 "args": [
