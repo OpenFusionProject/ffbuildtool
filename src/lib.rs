@@ -38,7 +38,7 @@ pub struct Version {
     uuid: Uuid,
     description: Option<String>,
     parent_uuid: Option<Uuid>,
-    main_file_url: String,
+    main_file_url: Option<String>,
     main_file_info: Option<FileInfo>,
     asset_info: AssetInfo,
 }
@@ -58,7 +58,7 @@ impl Version {
             uuid: Uuid::new_v4(),
             description: description.map(|s| s.to_string()),
             parent_uuid: parent,
-            main_file_url,
+            main_file_url: Some(main_file_url),
             main_file_info,
             asset_info,
         })
@@ -70,17 +70,17 @@ impl Version {
 
     /// Returns the total size of the build in bytes, including the main file.
     pub fn get_total_compressed_size(&self) -> u64 {
-        self.main_file_info.clone().unwrap_or_default().size + self.asset_info.total_compressed_size
+        self.main_file_info.clone().unwrap_or_default().size + self.get_compressed_assets_size()
     }
 
     /// Returns the total size of the compressed asset bundles in bytes.
     pub fn get_compressed_assets_size(&self) -> u64 {
-        self.asset_info.total_compressed_size
+        self.asset_info.total_compressed_size.unwrap_or(0)
     }
 
     /// Returns the total size of the uncompressed asset bundles in bytes.
     pub fn get_uncompressed_assets_size(&self) -> u64 {
-        self.asset_info.total_uncompressed_size
+        self.asset_info.total_uncompressed_size.unwrap_or(0)
     }
 
     /// Returns the asset URL for the build without a trailing slash.
@@ -312,8 +312,8 @@ impl Version {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct AssetInfo {
     asset_url: String,
-    total_compressed_size: u64,
-    total_uncompressed_size: u64,
+    total_compressed_size: Option<u64>,
+    total_uncompressed_size: Option<u64>,
     bundles: HashMap<String, BundleInfo>,
 }
 impl AssetInfo {
@@ -322,8 +322,8 @@ impl AssetInfo {
             Self::get_bundle_info(asset_root).await?;
         Ok(Self {
             asset_url: asset_url.to_string(),
-            total_compressed_size,
-            total_uncompressed_size,
+            total_compressed_size: Some(total_compressed_size),
+            total_uncompressed_size: Some(total_uncompressed_size),
             bundles,
         })
     }
