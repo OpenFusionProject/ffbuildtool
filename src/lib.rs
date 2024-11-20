@@ -36,12 +36,15 @@ pub type ProgressCallback = fn(&Uuid, &str, ItemProgress); // uuid, item name, p
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Version {
     uuid: Uuid,
+    asset_url: String,
     description: Option<String>,
     parent_uuid: Option<Uuid>,
+    hidden: Option<bool>,
     main_file_url: Option<String>,
     main_file_info: Option<FileInfo>,
-    hidden: Option<bool>,
-    asset_info: AssetInfo,
+    total_compressed_size: Option<u64>,
+    total_uncompressed_size: Option<u64>,
+    bundles: HashMap<String, BundleInfo>,
 }
 impl Version {
     /// Generates `Version` metadata given a local build root (compressed asset bundles).
@@ -53,16 +56,21 @@ impl Version {
     ) -> Result<Self, Error> {
         let main_path = format!("{}main.unity3d", asset_root);
         let main_file_info = FileInfo::build(&main_path).await.ok();
-        let asset_info = AssetInfo::build(asset_root, asset_url).await?;
-        let main_file_url = format!("{}main.unity3d", asset_url);
+        let (total_compressed_size, total_uncompressed_size, bundles) =
+            Self::get_bundle_info(asset_root).await?;
+        let asset_url = asset_url.trim_end_matches('/');
+        let main_file_url = format!("{}/main.unity3d", asset_url);
         Ok(Self {
             uuid: Uuid::new_v4(),
             description: description.map(|s| s.to_string()),
             parent_uuid: parent,
             main_file_url: Some(main_file_url),
             main_file_info,
-            hidden: None,
-            asset_info,
+            hidden: Some(false),
+            total_compressed_size: Some(total_compressed_size),
+            total_uncompressed_size: Some(total_uncompressed_size),
+            asset_url: asset_url.to_string(),
+            bundles,
         })
     }
 
@@ -75,12 +83,10 @@ impl Version {
             main_file_url: None,
             main_file_info: None,
             hidden: None,
-            asset_info: AssetInfo {
-                asset_url: asset_url.to_string(),
-                total_compressed_size: None,
-                total_uncompressed_size: None,
-                bundles: HashMap::new(),
-            },
+            asset_url: asset_url.to_string(),
+            total_compressed_size: None,
+            total_uncompressed_size: None,
+            bundles: HashMap::new(),
         }
     }
 
@@ -95,17 +101,17 @@ impl Version {
 
     /// Returns the total size of the compressed asset bundles in bytes.
     pub fn get_compressed_assets_size(&self) -> u64 {
-        self.asset_info.total_compressed_size.unwrap_or(0)
+        self.total_compressed_size.unwrap_or(0)
     }
 
     /// Returns the total size of the uncompressed asset bundles in bytes.
     pub fn get_uncompressed_assets_size(&self) -> u64 {
-        self.asset_info.total_uncompressed_size.unwrap_or(0)
+        self.total_uncompressed_size.unwrap_or(0)
     }
 
     /// Returns the asset URL for the build without a trailing slash.
     pub fn get_asset_url(&self) -> String {
-        let mut url = self.asset_info.asset_url.clone();
+        let mut url = self.asset_url.clone();
         if url.ends_with('/') {
             url.pop();
         }
@@ -124,7 +130,7 @@ impl Version {
 
     /// Overrides the asset URL for the build. Useful for testing.
     pub fn set_asset_url(&mut self, asset_url: &str) {
-        self.asset_info.asset_url = asset_url.to_string();
+        self.asset_url = asset_url.to_string();
     }
 
     /// Loads the `Version` metadata from a JSON manifest file path or URL.
@@ -158,7 +164,45 @@ impl Version {
     }
 
     pub fn get_bundle(&self, name: &str) -> Option<&BundleInfo> {
-        self.asset_info.bundles.get(name)
+        self.bundles.get(name)
+    }
+
+    /// Searches for asset bundles in the specified directory and generates validation data for each one.
+    async fn get_bundle_info(
+        asset_root: &str,
+    ) -> Result<(u64, u64, HashMap<String, BundleInfo>), Error> {
+        let bundle_names = get_bundle_names_from_asset_root(asset_root)?;
+        info!("Found {} bundles", bundle_names.len());
+        info!("Processing...");
+
+        let bundles: Arc<Mutex<HashMap<String, BundleInfo>>> = Arc::new(Mutex::new(HashMap::new()));
+        let mut tasks: Vec<JoinHandle<Result<(), String>>> = Vec::with_capacity(bundle_names.len());
+        for bundle_name in bundle_names {
+            let root = asset_root.to_string();
+            let bundles = Arc::clone(&bundles);
+            tasks.push(tokio::spawn(async move {
+                let bundle_info = BundleInfo::build(&root, &bundle_name)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                debug!("Processed {}", bundle_name);
+                bundles.lock().unwrap().insert(bundle_name, bundle_info);
+                Ok(())
+            }));
+        }
+
+        for task in tasks {
+            if let Err(e) = task.await? {
+                return Err(e.into());
+            }
+        }
+        info!("Done processing");
+
+        let bundles = Arc::try_unwrap(bundles).unwrap().into_inner().unwrap();
+        let total_compressed_size = bundles.values().map(|b| b.compressed_info.size).sum();
+        let total_uncompressed_size = bundles.values().map(|b| b.get_uncompressed_size()).sum();
+        info!("{} bytes compressed", total_compressed_size);
+        info!("{} bytes uncompressed", total_uncompressed_size);
+        Ok((total_compressed_size, total_uncompressed_size, bundles))
     }
 
     /// Validates the compressed asset bundles against the metadata. Returns a list of corrupted bundles.
@@ -206,7 +250,7 @@ impl Version {
         }
 
         info!("Checking asset bundles");
-        let bundles = self.asset_info.bundles.clone();
+        let bundles = self.bundles.clone();
         let repair_count = Arc::new(AtomicU64::new(0));
         let corrupted = Arc::new(Mutex::new(Vec::new()));
         let mut tasks = Vec::with_capacity(bundles.len());
@@ -264,7 +308,7 @@ impl Version {
             "Validating uncompressed asset bundles for {} ({})...",
             self.uuid, path
         );
-        let bundles = self.asset_info.bundles.clone();
+        let bundles = self.bundles.clone();
         let corrupted = Arc::new(Mutex::new(Vec::new()));
         let mut tasks = Vec::with_capacity(bundles.len());
         for (bundle_name, bundle_info) in bundles {
@@ -335,64 +379,6 @@ impl Version {
             .await?;
         info!("Repair complete");
         Ok(corrupted)
-    }
-}
-
-/// Contains the info for each asset bundle in the build.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-struct AssetInfo {
-    asset_url: String,
-    total_compressed_size: Option<u64>,
-    total_uncompressed_size: Option<u64>,
-    bundles: HashMap<String, BundleInfo>,
-}
-impl AssetInfo {
-    async fn build(asset_root: &str, asset_url: &str) -> Result<Self, Error> {
-        let (total_compressed_size, total_uncompressed_size, bundles) =
-            Self::get_bundle_info(asset_root).await?;
-        Ok(Self {
-            asset_url: asset_url.to_string(),
-            total_compressed_size: Some(total_compressed_size),
-            total_uncompressed_size: Some(total_uncompressed_size),
-            bundles,
-        })
-    }
-
-    async fn get_bundle_info(
-        asset_root: &str,
-    ) -> Result<(u64, u64, HashMap<String, BundleInfo>), Error> {
-        let bundle_names = get_bundle_names_from_asset_root(asset_root)?;
-        info!("Found {} bundles", bundle_names.len());
-        info!("Processing...");
-
-        let bundles: Arc<Mutex<HashMap<String, BundleInfo>>> = Arc::new(Mutex::new(HashMap::new()));
-        let mut tasks: Vec<JoinHandle<Result<(), String>>> = Vec::with_capacity(bundle_names.len());
-        for bundle_name in bundle_names {
-            let root = asset_root.to_string();
-            let bundles = Arc::clone(&bundles);
-            tasks.push(tokio::spawn(async move {
-                let bundle_info = BundleInfo::build(&root, &bundle_name)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                debug!("Processed {}", bundle_name);
-                bundles.lock().unwrap().insert(bundle_name, bundle_info);
-                Ok(())
-            }));
-        }
-
-        for task in tasks {
-            if let Err(e) = task.await? {
-                return Err(e.into());
-            }
-        }
-        info!("Done processing");
-
-        let bundles = Arc::try_unwrap(bundles).unwrap().into_inner().unwrap();
-        let total_compressed_size = bundles.values().map(|b| b.compressed_info.size).sum();
-        let total_uncompressed_size = bundles.values().map(|b| b.get_uncompressed_size()).sum();
-        info!("{} bytes compressed", total_compressed_size);
-        info!("{} bytes uncompressed", total_uncompressed_size);
-        Ok((total_compressed_size, total_uncompressed_size, bundles))
     }
 }
 

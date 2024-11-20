@@ -50,7 +50,7 @@ struct GenManifestArgs {
     output_path: String,
 
     /// Whether the version should be marked as hidden
-    #[clap(short = 'h', long)]
+    #[clap(long)]
     hidden: bool,
 }
 
