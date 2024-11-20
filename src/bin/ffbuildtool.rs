@@ -48,6 +48,10 @@ struct GenManifestArgs {
     /// Path to the output manifest file
     #[clap(short = 'o', long)]
     output_path: String,
+
+    /// Whether the version should be marked as hidden
+    #[clap(short = 'h', long)]
+    hidden: bool,
 }
 
 #[derive(Args, Debug)]
@@ -220,13 +224,18 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
         None
     };
 
-    let version = Version::build(
+    let mut version = Version::build(
         &args.build_path,
         &args.asset_url,
         args.description.as_deref(),
         parent_uuid,
     )
     .await?;
+
+    if args.hidden {
+        version.set_hidden(true);
+    }
+
     println!("Build UUID: {}", version.get_uuid());
 
     version.export_manifest(&args.output_path)?;

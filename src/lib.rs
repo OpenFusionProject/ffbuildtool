@@ -40,6 +40,7 @@ pub struct Version {
     parent_uuid: Option<Uuid>,
     main_file_url: Option<String>,
     main_file_info: Option<FileInfo>,
+    hidden: Option<bool>,
     asset_info: AssetInfo,
 }
 impl Version {
@@ -60,6 +61,7 @@ impl Version {
             parent_uuid: parent,
             main_file_url: Some(main_file_url),
             main_file_info,
+            hidden: None,
             asset_info,
         })
     }
@@ -90,6 +92,16 @@ impl Version {
             url.pop();
         }
         url
+    }
+
+    /// Marks the build as hidden or unhidden. What this means is up to the client code;
+    /// in OpenFusionLauncher, it will hide the build from the list of available builds.
+    pub fn set_hidden(&mut self, hidden: bool) {
+        self.hidden = Some(hidden);
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.hidden.unwrap_or(false)
     }
 
     /// Overrides the asset URL for the build. Useful for testing.
