@@ -37,13 +37,28 @@ pub type ProgressCallback = fn(&Uuid, &str, ItemProgress); // uuid, item name, p
 pub struct Version {
     uuid: Uuid,
     asset_url: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     parent_uuid: Option<Uuid>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     hidden: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     main_file_url: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     main_file_info: Option<FileInfo>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     total_compressed_size: Option<u64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     total_uncompressed_size: Option<u64>,
+
     bundles: HashMap<String, BundleInfo>,
 }
 impl Version {
