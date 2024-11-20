@@ -66,6 +66,24 @@ impl Version {
         })
     }
 
+    // Generates barebones `Version` metadata with only the asset URL and optional description.
+    pub fn build_barebones(asset_url: &str, description: Option<&str>) -> Self {
+        Self {
+            uuid: Uuid::new_v4(),
+            description: description.map(|s| s.to_string()),
+            parent_uuid: None,
+            main_file_url: None,
+            main_file_info: None,
+            hidden: None,
+            asset_info: AssetInfo {
+                asset_url: asset_url.to_string(),
+                total_compressed_size: None,
+                total_uncompressed_size: None,
+                bundles: HashMap::new(),
+            },
+        }
+    }
+
     pub fn get_uuid(&self) -> Uuid {
         self.uuid
     }
