@@ -109,6 +109,10 @@ impl Version {
         self.uuid
     }
 
+    pub fn get_description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
     /// Returns the total size of the build in bytes, including the main file.
     pub fn get_total_compressed_size(&self) -> u64 {
         self.main_file_info.clone().unwrap_or_default().size + self.get_compressed_assets_size()
