@@ -69,8 +69,8 @@ impl Version {
         description: Option<&str>,
         parent: Option<Uuid>,
     ) -> Result<Self, Error> {
-        let main_path = format!("{}main.unity3d", asset_root);
-        let main_file_info = FileInfo::build(&main_path).await.ok();
+        let main_path = PathBuf::from(asset_root).join("main.unity3d");
+        let main_file_info = FileInfo::build(&main_path.to_string_lossy()).await.ok();
         let (total_compressed_size, total_uncompressed_size, bundles) =
             Self::get_bundle_info(asset_root).await?;
         let asset_url = asset_url.trim_end_matches('/');
