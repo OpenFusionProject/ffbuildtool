@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use uuid::Uuid;
+
 use crate::{
     bundle::AssetBundle,
     util::{self, TempDir},
@@ -69,10 +71,12 @@ async fn test_validate_uncompressed_bad() {
 async fn test_generate_manifest() {
     let asset_root = "example_builds/compressed/good/";
     let asset_url = "http://example.url/builds/example_build/";
-    let description = Some("example-build");
-    let parent = None;
+    let name = Some("example-build");
+    let description = Some("Example build");
+    let uuid_104 = Uuid::parse_str("ec8063b2-54d4-4ee1-8d9e-381f5babd420").unwrap();
+    let parent = Some(uuid_104);
 
-    let mut version = Version::build(asset_root, asset_url, description, parent)
+    let mut version = Version::build(asset_root, asset_url, name, description, parent)
         .await
         .unwrap();
 

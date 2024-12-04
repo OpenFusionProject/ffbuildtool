@@ -39,6 +39,9 @@ pub struct Version {
     asset_url: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -66,6 +69,7 @@ impl Version {
     pub async fn build(
         asset_root: &str,
         asset_url: &str,
+        name: Option<&str>,
         description: Option<&str>,
         parent: Option<Uuid>,
     ) -> Result<Self, Error> {
@@ -77,6 +81,7 @@ impl Version {
         let main_file_url = format!("{}/main.unity3d", asset_url);
         Ok(Self {
             uuid: Uuid::new_v4(),
+            name: name.map(|s| s.to_string()),
             description: description.map(|s| s.to_string()),
             parent_uuid: parent,
             main_file_url: Some(main_file_url),
@@ -89,11 +94,12 @@ impl Version {
         })
     }
 
-    // Generates barebones `Version` metadata with only the asset URL and optional description.
-    pub fn build_barebones(asset_url: &str, description: Option<&str>) -> Self {
+    // Generates barebones `Version` metadata with only the asset URL and optional name.
+    pub fn build_barebones(asset_url: &str, name: Option<&str>) -> Self {
         Self {
             uuid: Uuid::new_v4(),
-            description: description.map(|s| s.to_string()),
+            name: name.map(|s| s.to_string()),
+            description: None,
             parent_uuid: None,
             main_file_url: None,
             main_file_info: None,

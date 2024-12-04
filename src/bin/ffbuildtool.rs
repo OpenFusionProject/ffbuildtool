@@ -37,6 +37,10 @@ struct GenManifestArgs {
     #[clap(short = 'u', long)]
     asset_url: String,
 
+    /// Name of the build
+    #[clap(short = 'n', long)]
+    name: Option<String>,
+
     /// Description of the build
     #[clap(short = 'd', long)]
     description: Option<String>,
@@ -227,6 +231,7 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
     let mut version = Version::build(
         &args.build_path,
         &args.asset_url,
+        args.name.as_deref(),
         args.description.as_deref(),
         parent_uuid,
     )
