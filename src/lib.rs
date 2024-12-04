@@ -62,6 +62,8 @@ pub struct Version {
     #[serde(skip_serializing_if = "Option::is_none")]
     total_uncompressed_size: Option<u64>,
 
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     bundles: HashMap<String, BundleInfo>,
 }
 impl Version {
