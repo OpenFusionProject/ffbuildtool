@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -197,9 +197,6 @@ impl ProgressManager {
 }
 
 static PROGRESS: OnceLock<ProgressManager> = OnceLock::new();
-fn progress_callback(_uuid: &Uuid, name: &str, progress: ItemProgress) {
-    PROGRESS.get().unwrap().update_item(name, progress);
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -255,8 +252,13 @@ async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
         version.get_uuid(),
         args.output_path
     );
+
+    let cb = |_uuid: &Uuid, name: &str, progress: ItemProgress| {
+        PROGRESS.get().unwrap().update_item(name, progress);
+    };
+
     version
-        .download_compressed(&args.output_path, Some(progress_callback))
+        .download_compressed(&args.output_path, Some(Arc::new(cb)))
         .await?;
     println!("Download complete");
     Ok(())
@@ -269,9 +271,12 @@ async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
         version.get_uuid(),
         args.build_path
     );
-    let corrupted = version
-        .repair(&args.build_path, Some(progress_callback))
-        .await?;
+
+    let cb = |_uuid: &Uuid, name: &str, progress: ItemProgress| {
+        PROGRESS.get().unwrap().update_item(name, progress);
+    };
+
+    let corrupted = version.repair(&args.build_path, Some(Arc::new(cb))).await?;
     if corrupted.is_empty() {
         println!("No corrupted files found");
     } else {
@@ -291,13 +296,17 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
         args.build_path
     );
 
+    let cb = |_uuid: &Uuid, name: &str, progress: ItemProgress| {
+        PROGRESS.get().unwrap().update_item(name, progress);
+    };
+
     let corrupted = if args.uncompressed {
         version
             .validate_uncompressed(&args.build_path, None)
             .await?
     } else {
         version
-            .validate_compressed(&args.build_path, Some(progress_callback))
+            .validate_compressed(&args.build_path, Some(Arc::new(cb)))
             .await?
     };
 

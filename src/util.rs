@@ -168,7 +168,7 @@ pub async fn download_to_file(
     let file_name = get_file_name_without_parent(file_path);
     let mut file = tokio::fs::File::create(file_path).await?;
 
-    if let Some(callback) = callback {
+    if let Some(ref callback) = callback {
         callback(&uuid, file_name, ItemProgress::Downloading(0, 0));
     }
 
@@ -176,18 +176,18 @@ pub async fn download_to_file(
     if url.starts_with("file:///") {
         let path = url.trim_start_matches("file:///");
         let size = std::fs::metadata(path)?.len();
-        if let Some(callback) = callback {
+        if let Some(ref callback) = callback {
             callback(&uuid, file_name, ItemProgress::Downloading(0, size));
         }
         let reader = tokio::fs::read(path).await?;
         file.write_all(&reader).await?;
-        if let Some(callback) = callback {
+        if let Some(ref callback) = callback {
             callback(&uuid, file_name, ItemProgress::Downloading(size, size));
         }
     } else {
         let response = reqwest::get(url).await?;
         let total_size = response.content_length().unwrap_or(0);
-        if let Some(callback) = callback {
+        if let Some(ref callback) = callback {
             callback(&uuid, file_name, ItemProgress::Downloading(0, total_size));
         }
 
@@ -198,7 +198,7 @@ pub async fn download_to_file(
             file.write_all(&chunk).await?;
             downloaded_size += chunk.len() as u64;
             let progress = ItemProgress::Downloading(downloaded_size, total_size);
-            if let Some(callback) = callback {
+            if let Some(ref callback) = callback {
                 callback(&uuid, file_name, progress);
             }
         }

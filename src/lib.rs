@@ -30,7 +30,9 @@ pub enum ItemProgress {
     Completed(u64), // total bytes
     Failed,
 }
-pub type ProgressCallback = fn(&Uuid, &str, ItemProgress); // uuid, item name, progress
+
+// uuid, item name, progress
+pub type ProgressCallback = Arc<dyn Fn(&Uuid, &str, ItemProgress) + Send + Sync>;
 
 /// Contains all the info comprising a FusionFall build.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -271,7 +273,7 @@ impl Version {
                     &main_file_path,
                     Some(self.uuid),
                     main_file_url.as_deref(),
-                    callback,
+                    callback.clone(),
                 )
                 .await?;
         }
@@ -282,6 +284,7 @@ impl Version {
         let corrupted = Arc::new(Mutex::new(Vec::new()));
         let mut tasks = Vec::with_capacity(bundles.len());
         for (bundle_name, bundle_info) in bundles {
+            let cb = callback.clone();
             let file_path = get_path(&bundle_name);
             let repair_count = Arc::clone(&repair_count);
             let corrupted = Arc::clone(&corrupted);
@@ -292,7 +295,7 @@ impl Version {
             let uuid = self.uuid;
             tasks.push(tokio::spawn(async move {
                 match bundle_info
-                    .validate_compressed(&file_path, Some(uuid), url.as_deref(), callback)
+                    .validate_compressed(&file_path, Some(uuid), url.as_deref(), cb)
                     .await
                 {
                     Ok(true) => {
@@ -339,6 +342,7 @@ impl Version {
         let corrupted = Arc::new(Mutex::new(Vec::new()));
         let mut tasks = Vec::with_capacity(bundles.len());
         for (bundle_name, bundle_info) in bundles {
+            let cb = callback.clone();
             let corrupted = Arc::clone(&corrupted);
             let bundle_name_url_encoded = util::url_encode(&bundle_name);
             let folder_path = PathBuf::from(path).join(&bundle_name_url_encoded);
@@ -347,7 +351,7 @@ impl Version {
                 match bundle_info.validate_uncompressed(
                     folder_path.to_str().unwrap(),
                     Some(uuid),
-                    callback,
+                    cb,
                 ) {
                     Ok(corrupted_files) => {
                         if !corrupted_files.is_empty() {
@@ -470,7 +474,7 @@ impl BundleInfo {
         let mut file_info = FileInfo::build_file(file_path);
         let mut attempts = 0;
         while let Err(e) = {
-            if let Some(cb) = callback {
+            if let Some(ref cb) = callback {
                 let uuid = version_uuid.unwrap_or_default();
                 cb(&uuid, file_name, ItemProgress::Validating);
             }
@@ -478,7 +482,7 @@ impl BundleInfo {
         } {
             warn!("{} invalid", file_name);
             let Some(url) = download_url else {
-                if let Some(cb) = callback {
+                if let Some(ref cb) = callback {
                     let uuid = version_uuid.unwrap_or_default();
                     cb(&uuid, file_name, ItemProgress::Failed);
                 }
@@ -486,7 +490,7 @@ impl BundleInfo {
             };
 
             if attempts >= MAX_DOWNLOAD_ATTEMPTS {
-                if let Some(cb) = callback {
+                if let Some(ref cb) = callback {
                     let uuid = version_uuid.unwrap_or_default();
                     cb(&uuid, file_name, ItemProgress::Failed);
                 }
@@ -497,7 +501,9 @@ impl BundleInfo {
                 .into());
             }
 
-            if let Err(e) = util::download_to_file(version_uuid, url, file_path, callback).await {
+            if let Err(e) =
+                util::download_to_file(version_uuid, url, file_path, callback.clone()).await
+            {
                 warn!("Failed to download {}: {}", file_path, e);
             } else {
                 file_info = FileInfo::build_file(file_path);
@@ -505,7 +511,7 @@ impl BundleInfo {
             attempts += 1;
         }
 
-        if let Some(cb) = callback {
+        if let Some(ref cb) = callback {
             let uuid = version_uuid.unwrap_or_default();
             cb(
                 &uuid,
@@ -530,7 +536,7 @@ impl BundleInfo {
             let file_info = FileInfo::build_file(file_path.to_str().unwrap());
             let file_id = format!("{}/{}", folder_path_leaf, file_name);
 
-            if let Some(cb) = callback {
+            if let Some(ref cb) = callback {
                 cb(&uuid, &file_id, ItemProgress::Validating);
             }
 
@@ -541,7 +547,7 @@ impl BundleInfo {
                 result = ItemProgress::Failed;
             }
 
-            if let Some(cb) = callback {
+            if let Some(ref cb) = callback {
                 cb(&uuid, &file_id, result);
             }
         }
