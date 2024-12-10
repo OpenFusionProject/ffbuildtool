@@ -1,6 +1,6 @@
 [package]
 name = "ffbuildtool"
-version = "3.0.1"
+version = "3.1.1"
 authors = ["OpenFusion Contributors"]
 edition = "2021"
 
