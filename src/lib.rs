@@ -240,16 +240,31 @@ impl Version {
         path: &str,
         callback: Option<ProgressCallback>,
     ) -> Result<Vec<String>, Error> {
-        self.validate_compressed_internal(path, false, callback)
+        self.validate_compressed_internal(path, false, false, callback)
             .await
     }
 
+    /// Validates the compressed asset bundles against the metadata. Stops on the first failure.
+    /// Returns the name of the first corrupted bundle.
+    pub async fn validate_compressed_stop_on_first_fail(
+        &self,
+        path: &str,
+        callback: Option<ProgressCallback>,
+    ) -> Result<Option<String>, Error> {
+        let corrupted = self
+            .validate_compressed_internal(path, false, true, callback)
+            .await?;
+        Ok(corrupted.first().cloned())
+    }
+
     /// Validates the compressed asset bundles against the metadata. Returns a list of corrupted bundles.
-    /// If `download_failed_bundles` is true, corrupted bundles will be re-downloaded.  
+    /// If `download_failed_bundles` is true, corrupted bundles will be re-downloaded.
+    /// If `stop_on_first_fail` is true, the function will return as soon as it encounters a corrupted bundle.
     async fn validate_compressed_internal(
         &self,
         path: &str,
         download_failed_bundles: bool,
+        stop_on_first_fail: bool,
         callback: Option<ProgressCallback>,
     ) -> Result<Vec<String>, Error> {
         info!(
@@ -259,6 +274,7 @@ impl Version {
 
         let get_path =
             |name: &str| -> String { PathBuf::from(path).join(name).to_str().unwrap().to_string() };
+        let mut corrupted_bundles = Vec::with_capacity(self.bundles.len() + 1);
 
         if let Some(main_file_info) = self.main_file_info.clone() {
             info!("Checking main file");
@@ -268,14 +284,23 @@ impl Version {
                 false => None,
                 true => Some(format!("{}/main.unity3d", self.get_asset_url())),
             };
-            main_bundle_info
+            if main_bundle_info
                 .validate_compressed(
                     &main_file_path,
                     Some(self.uuid),
                     main_file_url.as_deref(),
                     callback.clone(),
                 )
-                .await?;
+                .await
+                .is_err()
+            {
+                if stop_on_first_fail {
+                    info!("Main file corrupted");
+                    return Ok(vec!["main.unity3d".to_string()]);
+                } else {
+                    corrupted_bundles.push("main.unity3d".to_string());
+                }
+            }
         }
 
         info!("Checking asset bundles");
@@ -316,22 +341,57 @@ impl Version {
 
         for task in tasks {
             task.await?;
+            if stop_on_first_fail {
+                let corrupted = corrupted.lock().unwrap();
+                if let Some(bundle) = corrupted.first() {
+                    info!(
+                        "Validation complete; at least {} corrupted bundles",
+                        corrupted.len()
+                    );
+                    return Ok(vec![bundle.clone()]);
+                }
+            }
         }
 
         let repair_count = repair_count.load(Ordering::SeqCst);
-        let corrupted = Arc::try_unwrap(corrupted).unwrap().into_inner().unwrap();
+        corrupted_bundles.extend(Arc::try_unwrap(corrupted).unwrap().into_inner().unwrap());
         info!(
             "Validation complete; {}/{} missing or corrupted bundles repaired",
             repair_count,
-            corrupted.len()
+            corrupted_bundles.len()
         );
-        Ok(corrupted)
+        Ok(corrupted_bundles)
     }
 
     /// Validates the uncompressed asset bundles against the metadata. Returns a list of corrupted files.
     pub async fn validate_uncompressed(
         &self,
         path: &str,
+        callback: Option<ProgressCallback>,
+    ) -> Result<Vec<String>, Error> {
+        self.validate_uncompressed_internal(path, false, callback)
+            .await
+    }
+
+    /// Validates the uncompressed asset bundles against the metadata. Stops on the first failure.
+    /// Returns the name of the first corrupted file.
+    pub async fn validate_uncompressed_stop_on_first_fail(
+        &self,
+        path: &str,
+        callback: Option<ProgressCallback>,
+    ) -> Result<Option<String>, Error> {
+        let corrupted = self
+            .validate_uncompressed_internal(path, true, callback)
+            .await?;
+        Ok(corrupted.first().cloned())
+    }
+
+    /// Validates the uncompressed asset bundles against the metadata. Returns a list of corrupted files.
+    /// If `stop_on_first_fail` is true, the function will return as soon as it encounters a corrupted file.
+    async fn validate_uncompressed_internal(
+        &self,
+        path: &str,
+        stop_on_first_fail: bool,
         callback: Option<ProgressCallback>,
     ) -> Result<Vec<String>, Error> {
         info!(
@@ -373,6 +433,16 @@ impl Version {
 
         for task in tasks {
             task.await?;
+            if stop_on_first_fail {
+                let corrupted = corrupted.lock().unwrap();
+                if let Some(file) = corrupted.first() {
+                    info!(
+                        "Validation complete; at least {} corrupted files",
+                        corrupted.len()
+                    );
+                    return Ok(vec![file.clone()]);
+                }
+            }
         }
 
         let corrupted = Arc::try_unwrap(corrupted).unwrap().into_inner().unwrap();
@@ -406,7 +476,7 @@ impl Version {
         let uuid = self.uuid;
         info!("Repairing build {} at {}", uuid, path);
         let corrupted = self
-            .validate_compressed_internal(path, true, callback)
+            .validate_compressed_internal(path, true, false, callback)
             .await?;
         info!("Repair complete");
         Ok(corrupted)
