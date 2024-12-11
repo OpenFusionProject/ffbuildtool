@@ -135,6 +135,12 @@ impl AssetBundle {
             let data = file.data.clone();
             let info = info.clone();
             tasks.push(tokio::spawn(async move {
+                let _permit = if let Some(permits) = crate::ITEM_PERMITS.get() {
+                    Some(permits.acquire().await.unwrap())
+                } else {
+                    None
+                };
+
                 let file_info = util::process_item_buffer(None, Some(&name), data, None, None)
                     .await
                     .unwrap();
