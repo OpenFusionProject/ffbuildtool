@@ -1,26 +1,14 @@
-use std::io::{BufRead, Write as _};
+use std::{
+    io::BufRead,
+    sync::{Arc, Mutex},
+};
 
-use futures_util::StreamExt;
-use log::*;
+use futures_util::StreamExt as _;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt as _;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use uuid::Uuid;
 
-use crate::{Error, ItemProgress, ProgressCallback};
-
-pub fn get_file_hash(file_path: &str) -> Result<String, Error> {
-    let file = std::fs::File::open(file_path)?;
-    let mut reader = std::io::BufReader::new(file);
-    let mut hasher = Sha256::new();
-    std::io::copy(&mut reader, &mut hasher)?;
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-pub fn get_buffer_hash(buffer: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(buffer);
-    format!("{:x}", hasher.finalize())
-}
+use crate::{Error, FileInfo, ItemProgress, ProgressCallback};
 
 pub fn get_file_extension(file_path: &str) -> Option<&str> {
     std::path::Path::new(file_path)
@@ -33,6 +21,11 @@ pub fn get_file_name_without_extension(file_path: &str) -> &str {
         .file_stem()
         .and_then(|name| name.to_str())
         .unwrap_or(file_path)
+}
+
+pub fn get_file_name_from_url(url: &str) -> &str {
+    let url = url.trim_end_matches('/');
+    url.rsplit('/').next().unwrap_or(url)
 }
 
 pub fn get_file_name_without_parent(file_path: &str) -> &str {
@@ -53,33 +46,6 @@ pub fn list_filenames_in_directory(directory_path: &str) -> Result<Vec<String>, 
         }
     }
     Ok(filenames)
-}
-
-/// RAII struct for temporary files
-pub struct TempFile {
-    path: String,
-}
-impl TempFile {
-    pub async fn download(url: &str) -> Result<Self, Error> {
-        let response = reqwest::get(url).await?;
-        let filename = Uuid::new_v4().to_string();
-        let path = std::env::temp_dir().join(filename);
-        let mut file = std::fs::File::create(&path)?;
-        let bytes = response.bytes().await?;
-        file.write_all(&bytes)?;
-        Ok(Self {
-            path: path.to_string_lossy().to_string(),
-        })
-    }
-
-    pub fn path(&self) -> &str {
-        &self.path
-    }
-}
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
 }
 
 /// RAII struct for temporary directories
@@ -156,54 +122,215 @@ pub fn url_encode(input: &str) -> String {
     output
 }
 
-pub async fn download_to_file(
+pub fn get_hash_as_string(hash: &[u8]) -> String {
+    hash.iter().fold(String::new(), |mut s, byte| {
+        s.push_str(&format!("{:02x}", byte));
+        s
+    })
+}
+
+const MAX_CHUNK_SIZE: usize = 8 * 1024;
+
+async fn hash_chunk(chunk: [u8; MAX_CHUNK_SIZE], chunk_size: usize, hasher: Arc<Mutex<Sha256>>) {
+    tokio::task::spawn_blocking(move || {
+        let chunk = &chunk[..chunk_size];
+        let mut hasher = hasher.lock().unwrap();
+        hasher.update(chunk);
+    })
+    .await
+    .unwrap();
+}
+
+pub async fn process_item_buffer(
     associated_uuid: Option<Uuid>,
-    url: &str,
-    file_path: &str,
+    item_name: Option<&str>,
+    mut buffer: Vec<u8>,
+    out_file_path: Option<&str>,
     callback: Option<ProgressCallback>,
-) -> Result<(), Error> {
-    info!("Downloading {} to {}", url, file_path);
-
+) -> Result<FileInfo, Error> {
+    let item_name = item_name.unwrap_or("<buffer>");
     let uuid = associated_uuid.unwrap_or(Uuid::nil());
-    let file_name = get_file_name_without_parent(file_path);
-    let mut file = tokio::fs::File::create(file_path).await?;
+    let mut file = match out_file_path {
+        Some(out_file_path) => {
+            let file = tokio::fs::File::create(out_file_path).await?;
+            Some(file)
+        }
+        None => None,
+    };
 
+    let total_size = buffer.len() as u64;
     if let Some(ref callback) = callback {
-        callback(&uuid, file_name, ItemProgress::Downloading(0, 0));
+        callback(&uuid, item_name, ItemProgress::Downloading(0, total_size));
     }
 
-    // If the url is a file path, copy the file instead of downloading it
-    if url.starts_with("file:///") {
-        let path = url.trim_start_matches("file:///");
-        let size = std::fs::metadata(path)?.len();
-        if let Some(ref callback) = callback {
-            callback(&uuid, file_name, ItemProgress::Downloading(0, size));
+    let hasher = Arc::new(Mutex::new(Sha256::new()));
+    let mut bytes_processed = 0;
+    let mut chunk_buffer = [0; MAX_CHUNK_SIZE];
+    while !buffer.is_empty() {
+        let chunk_size = std::cmp::min(buffer.len(), MAX_CHUNK_SIZE);
+        chunk_buffer[..chunk_size].copy_from_slice(&buffer[..chunk_size]);
+        buffer.drain(..chunk_size);
+        bytes_processed += chunk_size as u64;
+        if let Some(ref mut file) = file {
+            file.write_all(&chunk_buffer[..chunk_size]).await?;
         }
-        let reader = tokio::fs::read(path).await?;
-        file.write_all(&reader).await?;
+        hash_chunk(chunk_buffer, chunk_size, hasher.clone()).await;
         if let Some(ref callback) = callback {
-            callback(&uuid, file_name, ItemProgress::Downloading(size, size));
+            callback(
+                &uuid,
+                item_name,
+                ItemProgress::Downloading(bytes_processed, total_size),
+            );
         }
-    } else {
-        let response = reqwest::get(url).await?;
-        let total_size = response.content_length().unwrap_or(0);
-        if let Some(ref callback) = callback {
-            callback(&uuid, file_name, ItemProgress::Downloading(0, total_size));
-        }
+    }
 
-        let mut downloaded_size = 0;
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            file.write_all(&chunk).await?;
-            downloaded_size += chunk.len() as u64;
-            let progress = ItemProgress::Downloading(downloaded_size, total_size);
+    assert!(bytes_processed == total_size);
+
+    let hasher = Arc::try_unwrap(hasher).unwrap().into_inner().unwrap();
+    let hash = hasher.finalize();
+    Ok(FileInfo {
+        size: bytes_processed,
+        hash: get_hash_as_string(hash.as_slice()),
+    })
+}
+
+pub async fn process_item(
+    associated_uuid: Option<Uuid>,
+    item_path: &str,
+    out_file_path: Option<&str>,
+    callback: Option<ProgressCallback>,
+) -> Result<FileInfo, Error> {
+    if item_path.starts_with("http://") || item_path.starts_with("https://") {
+        process_item_http(associated_uuid, item_path, out_file_path, callback).await
+    } else {
+        process_item_file(associated_uuid, item_path, out_file_path, callback).await
+    }
+}
+
+pub async fn process_item_file(
+    associated_uuid: Option<Uuid>,
+    file_path: &str,
+    out_file_path: Option<&str>,
+    callback: Option<ProgressCallback>,
+) -> Result<FileInfo, Error> {
+    let item_name = get_file_name_without_parent(file_path);
+    let uuid = associated_uuid.unwrap_or(Uuid::nil());
+    let mut file = match out_file_path {
+        Some(out_file_path) => {
+            let file = tokio::fs::File::create(out_file_path).await?;
+            Some(file)
+        }
+        None => None,
+    };
+
+    let total_size = std::fs::metadata(file_path)?.len();
+    if let Some(ref callback) = callback {
+        callback(&uuid, item_name, ItemProgress::Downloading(0, total_size));
+    }
+
+    let hasher = Arc::new(Mutex::new(Sha256::new()));
+    let in_file = tokio::fs::File::open(file_path).await?;
+    let mut reader = BufReader::new(in_file);
+    let mut bytes_processed = 0;
+    let mut buffer = [0; MAX_CHUNK_SIZE];
+    loop {
+        let bytes_read = reader.read(&mut buffer).await?;
+        if bytes_read == 0 {
+            break;
+        }
+        bytes_processed += bytes_read as u64;
+        if let Some(ref mut file) = file {
+            file.write_all(&buffer[..bytes_read]).await?;
+        }
+        hash_chunk(buffer, bytes_read, hasher.clone()).await;
+        if let Some(ref callback) = callback {
+            callback(
+                &uuid,
+                item_name,
+                ItemProgress::Downloading(bytes_processed, total_size),
+            );
+        }
+    }
+
+    if bytes_processed != total_size {
+        return Err(format!(
+            "Read size ({}) does not match source file size ({})",
+            bytes_processed, total_size
+        )
+        .into());
+    }
+
+    let hasher = Arc::try_unwrap(hasher).unwrap().into_inner().unwrap();
+    let hash = hasher.finalize();
+    Ok(FileInfo {
+        size: bytes_processed,
+        hash: get_hash_as_string(hash.as_slice()),
+    })
+}
+
+pub async fn process_item_http(
+    associated_uuid: Option<Uuid>,
+    url: &str,
+    out_file_path: Option<&str>,
+    callback: Option<ProgressCallback>,
+) -> Result<FileInfo, Error> {
+    let item_name = get_file_name_from_url(url);
+    let uuid = associated_uuid.unwrap_or(Uuid::nil());
+    let mut file = match out_file_path {
+        Some(out_file_path) => {
+            let file = tokio::fs::File::create(out_file_path).await?;
+            Some(file)
+        }
+        None => None,
+    };
+
+    let response = reqwest::get(url)
+        .await
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let total_size = response.content_length().unwrap_or(0);
+    if let Some(ref callback) = callback {
+        callback(&uuid, item_name, ItemProgress::Downloading(0, total_size));
+    }
+
+    let hasher = Arc::new(Mutex::new(Sha256::new()));
+    let mut stream = response.bytes_stream();
+    let mut bytes_processed = 0;
+    let mut buffer = [0; MAX_CHUNK_SIZE];
+    while let Some(available) = stream.next().await {
+        let mut available = available?.to_vec();
+        while !available.is_empty() {
+            let chunk_size = std::cmp::min(available.len(), MAX_CHUNK_SIZE);
+            buffer[..chunk_size].copy_from_slice(&available[..chunk_size]);
+            available.drain(..chunk_size);
+            bytes_processed += chunk_size as u64;
+            if let Some(ref mut file) = file {
+                file.write_all(&buffer[..chunk_size]).await?;
+            }
+            hash_chunk(buffer, chunk_size, hasher.clone()).await;
             if let Some(ref callback) = callback {
-                callback(&uuid, file_name, progress);
+                callback(
+                    &uuid,
+                    item_name,
+                    ItemProgress::Downloading(bytes_processed, total_size),
+                );
             }
         }
     }
-    Ok(())
+
+    if total_size != 0 && bytes_processed != total_size {
+        return Err(format!(
+            "Downloaded size ({}) does not match expected size ({})",
+            bytes_processed, total_size
+        )
+        .into());
+    }
+
+    let hasher = Arc::try_unwrap(hasher).unwrap().into_inner().unwrap();
+    let hash = hasher.finalize();
+    Ok(FileInfo {
+        size: bytes_processed,
+        hash: get_hash_as_string(hash.as_slice()),
+    })
 }
 
 pub fn copy_dir(from: &str, to: &str, recursive: bool) -> Result<(), Error> {

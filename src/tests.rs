@@ -109,6 +109,7 @@ async fn test_extract_bundle() {
             Some(version.get_uuid()),
             None,
         )
+        .await
         .unwrap();
     assert!(corrupted.is_empty());
 }

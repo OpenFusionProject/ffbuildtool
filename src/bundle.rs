@@ -123,12 +123,31 @@ impl AssetBundle {
 
     #[cfg(feature = "lzma")]
     pub async fn get_uncompressed_info(&self) -> Result<HashMap<String, FileInfo>, Error> {
+        use std::sync::Arc;
+
+        use tokio::{sync::Mutex, task::JoinHandle};
+
         let files = self.get_file_entries()?;
-        let result = files
-            .into_iter()
-            .map(|file| (file.name, FileInfo::build_buffer(&file.data)))
-            .collect();
-        Ok(result)
+        let info = Arc::new(Mutex::new(HashMap::new()));
+        let mut tasks: Vec<JoinHandle<()>> = Vec::with_capacity(files.len());
+        for file in files {
+            let name = file.name.clone();
+            let data = file.data.clone();
+            let info = info.clone();
+            tasks.push(tokio::spawn(async move {
+                let file_info = util::process_item_buffer(None, Some(&name), data, None, None)
+                    .await
+                    .unwrap();
+                info.lock().await.insert(name, file_info);
+            }));
+        }
+
+        for task in tasks {
+            task.await?;
+        }
+
+        let info = Arc::try_unwrap(info).unwrap().into_inner();
+        Ok(info)
     }
 
     #[cfg(feature = "lzma")]

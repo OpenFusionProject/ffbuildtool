@@ -3,19 +3,18 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
 
 use bundle::AssetBundle;
 use serde::{Deserialize, Serialize};
-use tokio::task::JoinHandle;
-use util::TempFile;
+use tokio::{sync::Mutex, task::JoinHandle};
 use uuid::Uuid;
 
 use log::*;
 
-pub type Error = Box<dyn std::error::Error>;
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub mod bundle;
 pub mod util;
@@ -78,7 +77,8 @@ impl Version {
         parent: Option<Uuid>,
     ) -> Result<Self, Error> {
         let main_path = PathBuf::from(asset_root).join("main.unity3d");
-        let main_file_info = FileInfo::build(&main_path.to_string_lossy()).await.ok();
+        let main_path = main_path.to_string_lossy();
+        let main_file_info = util::process_item(None, &main_path, None, None).await.ok();
         let (total_compressed_size, total_uncompressed_size, bundles) =
             Self::get_bundle_info(asset_root).await?;
         let asset_url = asset_url.trim_end_matches('/');
@@ -162,6 +162,12 @@ impl Version {
         self.asset_url = asset_url.to_string();
     }
 
+    /// Loads the `Version` metadata from a JSON string.
+    pub fn from_manifest_raw(json: &str) -> Result<Self, Error> {
+        let version: Self = serde_json::from_str(json)?;
+        Ok(version)
+    }
+
     /// Loads the `Version` metadata from a JSON manifest file path or URL.
     pub async fn from_manifest(path_or_url: &str) -> Result<Self, Error> {
         if path_or_url.starts_with("http") {
@@ -174,14 +180,14 @@ impl Version {
     /// Loads the `Version` metadata from a JSON manifest file.
     pub fn from_manifest_file(path: &str) -> Result<Self, Error> {
         let json = std::fs::read_to_string(path)?;
-        let version: Self = serde_json::from_str(&json)?;
+        let version = Self::from_manifest_raw(&json)?;
         Ok(version)
     }
 
     /// Loads the `Version` metadata from a JSON manifest file hosted on the web.
     pub async fn from_manifest_url(url: &str) -> Result<Self, Error> {
-        let manifest = TempFile::download(url).await?;
-        let version = Self::from_manifest_file(manifest.path())?;
+        let json = reqwest::get(url).await?.text().await?;
+        let version = Self::from_manifest_raw(&json)?;
         Ok(version)
     }
 
@@ -214,7 +220,7 @@ impl Version {
                     .await
                     .map_err(|e| e.to_string())?;
                 debug!("Processed {}", bundle_name);
-                bundles.lock().unwrap().insert(bundle_name, bundle_info);
+                bundles.lock().await.insert(bundle_name, bundle_info);
                 Ok(())
             }));
         }
@@ -226,7 +232,7 @@ impl Version {
         }
         info!("Done processing");
 
-        let bundles = Arc::try_unwrap(bundles).unwrap().into_inner().unwrap();
+        let bundles = Arc::try_unwrap(bundles).unwrap().into_inner();
         let total_compressed_size = bundles.values().map(|b| b.compressed_info.size).sum();
         let total_uncompressed_size = bundles.values().map(|b| b.get_uncompressed_size()).sum();
         info!("{} bytes compressed", total_compressed_size);
@@ -325,7 +331,7 @@ impl Version {
                 {
                     Ok(true) => {
                         info!("{} repaired", bundle_name);
-                        corrupted.lock().unwrap().push(bundle_name);
+                        corrupted.lock().await.push(bundle_name);
                         repair_count.fetch_add(1, Ordering::SeqCst);
                     }
                     Ok(false) => {
@@ -333,7 +339,7 @@ impl Version {
                     }
                     Err(e) => {
                         warn!("{} failed validation: {}", bundle_name, e);
-                        corrupted.lock().unwrap().push(bundle_name);
+                        corrupted.lock().await.push(bundle_name);
                     }
                 }
             }));
@@ -342,7 +348,7 @@ impl Version {
         for task in tasks {
             task.await?;
             if stop_on_first_fail {
-                let corrupted = corrupted.lock().unwrap();
+                let corrupted = corrupted.lock().await;
                 if let Some(bundle) = corrupted.first() {
                     info!(
                         "Validation complete; at least {} corrupted bundles",
@@ -354,7 +360,7 @@ impl Version {
         }
 
         let repair_count = repair_count.load(Ordering::SeqCst);
-        corrupted_bundles.extend(Arc::try_unwrap(corrupted).unwrap().into_inner().unwrap());
+        corrupted_bundles.extend(Arc::try_unwrap(corrupted).unwrap().into_inner());
         info!(
             "Validation complete; {}/{} missing or corrupted bundles repaired",
             repair_count,
@@ -408,24 +414,23 @@ impl Version {
             let folder_path = PathBuf::from(path).join(&bundle_name_url_encoded);
             let uuid = self.uuid;
             tasks.push(tokio::spawn(async move {
-                match bundle_info.validate_uncompressed(
-                    folder_path.to_str().unwrap(),
-                    Some(uuid),
-                    cb,
-                ) {
+                match bundle_info
+                    .validate_uncompressed(folder_path.to_str().unwrap(), Some(uuid), cb)
+                    .await
+                {
                     Ok(corrupted_files) => {
                         if !corrupted_files.is_empty() {
                             for (file_name, e) in &corrupted_files {
                                 warn!("{} failed validation: {}", file_name, e);
                             }
-                            corrupted.lock().unwrap().extend(
+                            corrupted.lock().await.extend(
                                 corrupted_files.into_iter().map(|(file_name, _)| file_name),
                             );
                         }
                     }
                     Err(e) => {
                         warn!("{} failed validation: {}", bundle_name, e);
-                        corrupted.lock().unwrap().push(bundle_name);
+                        corrupted.lock().await.push(bundle_name);
                     }
                 }
             }));
@@ -434,7 +439,7 @@ impl Version {
         for task in tasks {
             task.await?;
             if stop_on_first_fail {
-                let corrupted = corrupted.lock().unwrap();
+                let corrupted = corrupted.lock().await;
                 if let Some(file) = corrupted.first() {
                     info!(
                         "Validation complete; at least {} corrupted files",
@@ -445,7 +450,7 @@ impl Version {
             }
         }
 
-        let corrupted = Arc::try_unwrap(corrupted).unwrap().into_inner().unwrap();
+        let corrupted = Arc::try_unwrap(corrupted).unwrap().into_inner();
         info!("Validation complete; {} corrupted files", corrupted.len());
         Ok(corrupted)
     }
@@ -500,7 +505,7 @@ impl BundleInfo {
     async fn build(asset_root: &str, bundle_name: &str) -> Result<Self, Error> {
         let file_path = format!("{}/{}", asset_root, bundle_name);
 
-        let compressed_info = FileInfo::build(&file_path).await?;
+        let compressed_info = util::process_item(None, &file_path, None, None).await?;
         let bundle = AssetBundle::from_file(&file_path)?;
         if bundle.get_file_size() != compressed_info.size {
             warn!(
@@ -541,8 +546,10 @@ impl BundleInfo {
     ) -> Result<bool, Error> {
         const MAX_DOWNLOAD_ATTEMPTS: usize = 5;
         let file_name = util::get_file_name_without_parent(file_path);
-        let mut file_info = FileInfo::build_file(file_path);
         let mut attempts = 0;
+        let mut file_info = util::process_item(version_uuid, file_path, None, None)
+            .await
+            .unwrap_or_default();
         while let Err(e) = {
             if let Some(ref cb) = callback {
                 let uuid = version_uuid.unwrap_or_default();
@@ -571,13 +578,17 @@ impl BundleInfo {
                 .into());
             }
 
-            if let Err(e) =
-                util::download_to_file(version_uuid, url, file_path, callback.clone()).await
+            match util::process_item_http(version_uuid, url, Some(file_path), callback.clone())
+                .await
             {
-                warn!("Failed to download {}: {}", file_path, e);
-            } else {
-                file_info = FileInfo::build_file(file_path);
+                Ok(info) => {
+                    file_info = info;
+                }
+                Err(e) => {
+                    warn!("Failed to download {}: {}", file_path, e);
+                }
             }
+
             attempts += 1;
         }
 
@@ -592,7 +603,7 @@ impl BundleInfo {
         Ok(attempts > 0)
     }
 
-    pub fn validate_uncompressed(
+    pub async fn validate_uncompressed(
         &self,
         folder_path: &str,
         version_uuid: Option<Uuid>,
@@ -603,7 +614,9 @@ impl BundleInfo {
         let mut corrupted = Vec::new();
         for (file_name, file_info_good) in &self.uncompressed_info {
             let file_path = PathBuf::from(folder_path).join(file_name);
-            let file_info = FileInfo::build_file(file_path.to_str().unwrap());
+            let file_path = file_path.to_string_lossy();
+            let file_info =
+                util::process_item_file(Some(uuid), &file_path, None, callback.clone()).await?;
             let file_id = format!("{}/{}", folder_path_leaf, file_name);
 
             if let Some(ref cb) = callback {
@@ -631,37 +644,6 @@ pub struct FileInfo {
     size: u64,
 }
 impl FileInfo {
-    async fn build(uri: &str) -> Result<Self, Error> {
-        if uri.starts_with("http") {
-            Self::build_http(uri).await
-        } else {
-            Ok(Self::build_file(uri))
-        }
-    }
-
-    async fn build_http(url: &str) -> Result<Self, Error> {
-        info!("Fetching {}", url);
-        let temp_file = TempFile::download(url).await?;
-        Ok(Self::build_file(temp_file.path()))
-    }
-
-    fn build_file(file_path: &str) -> Self {
-        let build_file_internal = || -> Result<Self, Error> {
-            let hash = util::get_file_hash(file_path)?;
-            let size = std::fs::metadata(file_path)?.len();
-            Ok(Self { hash, size })
-        };
-        // if we can't access the file, assume it's corrupt
-        build_file_internal().unwrap_or_default()
-    }
-
-    #[cfg(feature = "lzma")]
-    fn build_buffer(buffer: &[u8]) -> Self {
-        let hash = util::get_buffer_hash(buffer);
-        let size = buffer.len() as u64;
-        Self { hash, size }
-    }
-
     fn validate(&self, good: &Self) -> Result<(), String> {
         if self.size != good.size {
             return Err(format!(

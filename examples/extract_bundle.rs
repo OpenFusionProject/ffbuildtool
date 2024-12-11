@@ -35,6 +35,7 @@ async fn main() {
                 Some(version.get_uuid()),
                 None,
             )
+            .await
             .unwrap();
         info!("Validation took {:?}", time.elapsed());
     }
