@@ -127,7 +127,7 @@ impl AssetBundle {
 
         use tokio::{sync::Mutex, task::JoinHandle};
 
-        let files = self.get_file_entries()?;
+        let files = self.get_file_entries().await?;
         let info = Arc::new(Mutex::new(HashMap::new()));
         let mut tasks: Vec<JoinHandle<()>> = Vec::with_capacity(files.len());
         for file in files {
@@ -151,13 +151,13 @@ impl AssetBundle {
     }
 
     #[cfg(feature = "lzma")]
-    pub fn extract_files(&self, output_dir: &str) -> Result<(), Error> {
+    pub async fn extract_files(&self, output_dir: &str) -> Result<(), Error> {
         let url_encoded_name = util::url_encode(self.get_file_name());
         let path = PathBuf::from(output_dir).join(url_encoded_name);
 
         std::fs::create_dir_all(std::path::Path::new(&path))?;
 
-        let files = self.get_file_entries()?;
+        let files = self.get_file_entries().await?;
         for file in files {
             let file_id = format!("{}{}", output_dir, file.name);
             let path = path.join(&file.name);
@@ -171,14 +171,14 @@ impl AssetBundle {
     }
 
     #[cfg(feature = "lzma")]
-    fn get_file_entries(&self) -> Result<Vec<BundleFile>, Error> {
+    async fn get_file_entries(&self) -> Result<Vec<BundleFile>, Error> {
         let mut file = std::fs::File::open(&self.path)?;
         let mut reader = std::io::BufReader::new(&mut file);
         reader.seek(std::io::SeekFrom::Start(self.data_offset as u64))?;
         let mut buf = Vec::new();
         reader.read_to_end(&mut buf)?;
 
-        let uncompressed = util::decompress(&buf)?;
+        let uncompressed = tokio::task::spawn_blocking(move || util::decompress(&buf)).await??;
         let mut reader = std::io::BufReader::new(&uncompressed[..]);
         let num_files = util::read_u32(&mut reader)?;
 

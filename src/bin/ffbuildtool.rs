@@ -329,5 +329,5 @@ async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), Error> {
         args.bundle_path, args.output_dir
     );
     let asset_bundle = AssetBundle::from_file(&args.bundle_path)?;
-    asset_bundle.extract_files(&args.output_dir)
+    asset_bundle.extract_files(&args.output_dir).await
 }

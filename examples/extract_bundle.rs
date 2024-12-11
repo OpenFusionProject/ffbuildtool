@@ -20,7 +20,7 @@ async fn main() {
 
         let time = std::time::Instant::now();
         let asset = AssetBundle::from_file(&asset_path).unwrap();
-        asset.extract_files(output_dir).unwrap();
+        asset.extract_files(output_dir).await.unwrap();
         info!("Extraction took {:?}", time.elapsed());
 
         let version = Version::from_manifest_file("example_manifest.json").unwrap();

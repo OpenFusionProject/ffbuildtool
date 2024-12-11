@@ -96,7 +96,7 @@ async fn test_extract_bundle() {
     let output_dir = TempDir::new();
 
     let asset_bundle = AssetBundle::from_file(bundle_path).unwrap();
-    asset_bundle.extract_files(output_dir.path()).unwrap();
+    asset_bundle.extract_files(output_dir.path()).await.unwrap();
     let output_files_dir =
         PathBuf::from(output_dir.path()).join(util::url_encode("Map_00_00.unity3d"));
 
