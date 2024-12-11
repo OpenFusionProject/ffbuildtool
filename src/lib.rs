@@ -3,13 +3,13 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
 };
 
 use bundle::AssetBundle;
 use serde::{Deserialize, Serialize};
-use tokio::task::JoinHandle;
+use tokio::{sync::Semaphore, task::JoinHandle};
 use util::TempFile;
 use uuid::Uuid;
 
@@ -62,6 +62,16 @@ pub enum ItemProgress {
 
 // uuid, item name, progress
 pub type ProgressCallback = Arc<dyn Fn(&Uuid, &str, ItemProgress) + Send + Sync>;
+
+static ITEM_PERMITS: OnceLock<Semaphore> = OnceLock::new();
+
+/// Sets the maximum number of concurrent items that can be processed at once for all operations.
+/// Returns an error if the value has already been set.
+pub fn set_max_concurrent_items(max: usize) -> Result<(), String> {
+    ITEM_PERMITS
+        .set(Semaphore::new(max))
+        .map_err(|_| "Limit already set".to_string())
+}
 
 /// Contains all the info comprising a FusionFall build.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -239,6 +249,12 @@ impl Version {
             let root = asset_root.to_string();
             let bundles = Arc::clone(&bundles);
             tasks.push(tokio::spawn(async move {
+                let _permit = if let Some(permits) = ITEM_PERMITS.get() {
+                    Some(permits.acquire().await.unwrap())
+                } else {
+                    None
+                };
+
                 let bundle_info = BundleInfo::build(&root, &bundle_name)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -348,6 +364,12 @@ impl Version {
             };
             let uuid = self.uuid;
             tasks.push(tokio::spawn(async move {
+                let _permit = if let Some(permits) = crate::ITEM_PERMITS.get() {
+                    Some(permits.acquire().await.unwrap())
+                } else {
+                    None
+                };
+
                 match bundle_info
                     .validate_compressed(&file_path, Some(uuid), url.as_deref(), cb)
                     .await
@@ -437,6 +459,12 @@ impl Version {
             let folder_path = PathBuf::from(path).join(&bundle_name_url_encoded);
             let uuid = self.uuid;
             tasks.push(tokio::spawn(async move {
+                let _permit = if let Some(permits) = crate::ITEM_PERMITS.get() {
+                    Some(permits.acquire().await.unwrap())
+                } else {
+                    None
+                };
+
                 match bundle_info.validate_uncompressed(
                     folder_path.to_str().unwrap(),
                     Some(uuid),
