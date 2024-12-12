@@ -18,9 +18,13 @@ async fn main() {
     let total_download_size = Arc::new(AtomicU64::new(0));
     let total_download_size_cb = total_download_size.clone();
     let progress_callback = move |_uuid: &Uuid, _name: &str, progress: ItemProgress| {
-        if let ItemProgress::Downloading(current_size, total_size) = progress {
-            if current_size == total_size {
-                total_download_size_cb.fetch_add(current_size, Ordering::AcqRel);
+        if let ItemProgress::Downloading {
+            bytes_downloaded,
+            total_bytes,
+        } = progress
+        {
+            if bytes_downloaded == total_bytes {
+                total_download_size_cb.fetch_add(bytes_downloaded, Ordering::AcqRel);
             }
         }
     };

@@ -23,12 +23,41 @@ pub mod util;
 #[cfg(test)]
 mod tests;
 
+#[derive(Debug, Clone)]
+pub enum FailReason {
+    BadSize { expected: u64, actual: u64 },
+    BadHash { expected: String, actual: String },
+    Missing,
+}
+impl std::fmt::Display for FailReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            FailReason::BadSize { expected, actual } => {
+                write!(f, "Bad size: {} (disk) vs {} (manifest)", actual, expected)
+            }
+            FailReason::BadHash { expected, actual } => {
+                write!(f, "Bad hash: {} (disk) vs {} (manifest)", actual, expected)
+            }
+            FailReason::Missing => write!(f, "File missing"),
+        }
+    }
+}
+impl std::error::Error for FailReason {}
+
 #[derive(Debug)]
 pub enum ItemProgress {
-    Downloading(u64, u64), // bytes downloaded, total bytes
+    Downloading {
+        bytes_downloaded: u64,
+        total_bytes: u64,
+    },
     Validating,
-    Completed(u64), // total bytes
-    Failed,
+    Passed {
+        item_size: u64,
+    },
+    Failed {
+        item_size: u64,
+        reason: FailReason,
+    },
 }
 
 // uuid, item name, progress
@@ -543,7 +572,7 @@ impl BundleInfo {
         let file_name = util::get_file_name_without_parent(file_path);
         let mut file_info = FileInfo::build_file(file_path);
         let mut attempts = 0;
-        while let Err(e) = {
+        while let Err(fail_reason) = {
             if let Some(ref cb) = callback {
                 let uuid = version_uuid.unwrap_or_default();
                 cb(&uuid, file_name, ItemProgress::Validating);
@@ -554,19 +583,33 @@ impl BundleInfo {
             let Some(url) = download_url else {
                 if let Some(ref cb) = callback {
                     let uuid = version_uuid.unwrap_or_default();
-                    cb(&uuid, file_name, ItemProgress::Failed);
+                    cb(
+                        &uuid,
+                        file_name,
+                        ItemProgress::Failed {
+                            item_size: self.compressed_info.size,
+                            reason: fail_reason.clone(),
+                        },
+                    );
                 }
-                return Err(e.into());
+                return Err(fail_reason.clone().into());
             };
 
             if attempts >= MAX_DOWNLOAD_ATTEMPTS {
                 if let Some(ref cb) = callback {
                     let uuid = version_uuid.unwrap_or_default();
-                    cb(&uuid, file_name, ItemProgress::Failed);
+                    cb(
+                        &uuid,
+                        file_name,
+                        ItemProgress::Failed {
+                            item_size: self.compressed_info.size,
+                            reason: fail_reason.clone(),
+                        },
+                    );
                 }
                 return Err(format!(
                     "Failed to download {} after {} attempts: {}",
-                    file_path, attempts, e
+                    file_path, attempts, fail_reason
                 )
                 .into());
             }
@@ -586,7 +629,9 @@ impl BundleInfo {
             cb(
                 &uuid,
                 file_name,
-                ItemProgress::Completed(self.compressed_info.size),
+                ItemProgress::Passed {
+                    item_size: self.compressed_info.size,
+                },
             );
         }
         Ok(attempts > 0)
@@ -597,7 +642,7 @@ impl BundleInfo {
         folder_path: &str,
         version_uuid: Option<Uuid>,
         callback: Option<ProgressCallback>,
-    ) -> Result<Vec<(String, String)>, Error> {
+    ) -> Result<Vec<(String, FailReason)>, Error> {
         let uuid = version_uuid.unwrap_or_default();
         let folder_path_leaf = util::get_file_name_without_parent(folder_path);
         let mut corrupted = Vec::new();
@@ -610,11 +655,16 @@ impl BundleInfo {
                 cb(&uuid, &file_id, ItemProgress::Validating);
             }
 
-            let mut result = ItemProgress::Completed(file_info_good.size);
-            if let Err(e) = file_info.validate(file_info_good) {
-                warn!("{} invalid: {}", file_id, e);
-                corrupted.push((file_id.clone(), e));
-                result = ItemProgress::Failed;
+            let mut result = ItemProgress::Passed {
+                item_size: file_info_good.size,
+            };
+            if let Err(fail_reason) = file_info.validate(file_info_good) {
+                warn!("{} invalid: {}", file_id, fail_reason);
+                corrupted.push((file_id.clone(), fail_reason.clone()));
+                result = ItemProgress::Failed {
+                    item_size: file_info_good.size,
+                    reason: fail_reason,
+                };
             }
 
             if let Some(ref cb) = callback {
@@ -662,19 +712,19 @@ impl FileInfo {
         Self { hash, size }
     }
 
-    fn validate(&self, good: &Self) -> Result<(), String> {
+    fn validate(&self, good: &Self) -> Result<(), FailReason> {
         if self.size != good.size {
-            return Err(format!(
-                "Bad size: {} (disk) vs {} (manifest)",
-                self.size, good.size
-            ));
+            return Err(FailReason::BadSize {
+                expected: good.size,
+                actual: self.size,
+            });
         }
 
         if self.hash != good.hash {
-            return Err(format!(
-                "Bad hash: {} (disk) vs {} (manifest)",
-                self.hash, good.hash
-            ));
+            return Err(FailReason::BadHash {
+                expected: good.hash.clone(),
+                actual: self.hash.clone(),
+            });
         }
 
         Ok(())

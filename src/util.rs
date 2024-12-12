@@ -169,7 +169,14 @@ pub async fn download_to_file(
     let mut file = tokio::fs::File::create(file_path).await?;
 
     if let Some(ref callback) = callback {
-        callback(&uuid, file_name, ItemProgress::Downloading(0, 0));
+        callback(
+            &uuid,
+            file_name,
+            ItemProgress::Downloading {
+                bytes_downloaded: 0,
+                total_bytes: 0,
+            },
+        );
     }
 
     // If the url is a file path, copy the file instead of downloading it
@@ -177,18 +184,39 @@ pub async fn download_to_file(
         let path = url.trim_start_matches("file:///");
         let size = std::fs::metadata(path)?.len();
         if let Some(ref callback) = callback {
-            callback(&uuid, file_name, ItemProgress::Downloading(0, size));
+            callback(
+                &uuid,
+                file_name,
+                ItemProgress::Downloading {
+                    bytes_downloaded: 0,
+                    total_bytes: size,
+                },
+            );
         }
         let reader = tokio::fs::read(path).await?;
         file.write_all(&reader).await?;
         if let Some(ref callback) = callback {
-            callback(&uuid, file_name, ItemProgress::Downloading(size, size));
+            callback(
+                &uuid,
+                file_name,
+                ItemProgress::Downloading {
+                    bytes_downloaded: size,
+                    total_bytes: size,
+                },
+            );
         }
     } else {
         let response = reqwest::get(url).await?;
         let total_size = response.content_length().unwrap_or(0);
         if let Some(ref callback) = callback {
-            callback(&uuid, file_name, ItemProgress::Downloading(0, total_size));
+            callback(
+                &uuid,
+                file_name,
+                ItemProgress::Downloading {
+                    bytes_downloaded: 0,
+                    total_bytes: total_size,
+                },
+            );
         }
 
         let mut downloaded_size = 0;
@@ -197,7 +225,10 @@ pub async fn download_to_file(
             let chunk = chunk?;
             file.write_all(&chunk).await?;
             downloaded_size += chunk.len() as u64;
-            let progress = ItemProgress::Downloading(downloaded_size, total_size);
+            let progress = ItemProgress::Downloading {
+                bytes_downloaded: downloaded_size,
+                total_bytes: total_size,
+            };
             if let Some(ref callback) = callback {
                 callback(&uuid, file_name, progress);
             }

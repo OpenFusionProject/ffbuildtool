@@ -138,13 +138,16 @@ impl ProgressManager {
 
     fn update_item(&self, name: &str, progress: ItemProgress) {
         match progress {
-            ItemProgress::Downloading(current, total) => {
-                self.update_item_downloading(name, current, total);
+            ItemProgress::Downloading {
+                bytes_downloaded,
+                total_bytes,
+            } => {
+                self.update_item_downloading(name, bytes_downloaded, total_bytes);
             }
             ItemProgress::Validating => {
                 self.update_item_validating(name);
             }
-            ItemProgress::Completed(_) | ItemProgress::Failed => {
+            ItemProgress::Passed { .. } | ItemProgress::Failed { .. } => {
                 self.finish_item(name);
             }
         }
