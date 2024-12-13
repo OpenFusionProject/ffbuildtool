@@ -64,11 +64,20 @@ pub enum ItemProgress {
 pub type ProgressCallback = Arc<dyn Fn(&Uuid, &str, ItemProgress) + Send + Sync>;
 
 static ITEM_PERMITS: OnceLock<Semaphore> = OnceLock::new();
+static DOWNLOAD_PERMITS: OnceLock<Semaphore> = OnceLock::new();
 
 /// Sets the maximum number of concurrent items that can be processed at once for all operations.
 /// Returns an error if the value has already been set.
 pub fn set_max_concurrent_items(max: usize) -> Result<(), String> {
     ITEM_PERMITS
+        .set(Semaphore::new(max))
+        .map_err(|_| "Limit already set".to_string())
+}
+
+/// Sets the maximum number of concurrent downloads that can run at once for download/repair operations.
+/// Returns an error if the value has already been set.
+pub fn set_max_concurrent_downloads(max: usize) -> Result<(), String> {
+    DOWNLOAD_PERMITS
         .set(Semaphore::new(max))
         .map_err(|_| "Limit already set".to_string())
 }

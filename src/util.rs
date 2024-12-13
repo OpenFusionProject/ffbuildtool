@@ -61,11 +61,19 @@ pub struct TempFile {
 }
 impl TempFile {
     pub async fn download(url: &str) -> Result<Self, Error> {
+        let permit = if let Some(permits) = crate::DOWNLOAD_PERMITS.get() {
+            Some(permits.acquire().await.unwrap())
+        } else {
+            None
+        };
+
         let response = reqwest::get(url).await?;
         let filename = Uuid::new_v4().to_string();
         let path = std::env::temp_dir().join(filename);
         let mut file = std::fs::File::create(&path)?;
         let bytes = response.bytes().await?;
+        drop(permit);
+
         file.write_all(&bytes)?;
         Ok(Self {
             path: path.to_string_lossy().to_string(),
@@ -206,6 +214,12 @@ pub async fn download_to_file(
             );
         }
     } else {
+        let _permit = if let Some(permits) = crate::DOWNLOAD_PERMITS.get() {
+            Some(permits.acquire().await.unwrap())
+        } else {
+            None
+        };
+
         let response = reqwest::get(url).await?;
         let total_size = response.content_length().unwrap_or(0);
         if let Some(ref callback) = callback {
