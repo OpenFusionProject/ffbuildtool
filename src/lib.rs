@@ -713,6 +713,10 @@ impl FileInfo {
     }
 
     fn validate(&self, good: &Self) -> Result<(), FailReason> {
+        if self.size == 0 {
+            return Err(FailReason::Missing);
+        }
+
         if self.size != good.size {
             return Err(FailReason::BadSize {
                 expected: good.size,
