@@ -167,6 +167,10 @@ impl Version {
         self.uuid
     }
 
+    pub fn get_name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
     pub fn get_description(&self) -> Option<&str> {
         self.description.as_deref()
     }
