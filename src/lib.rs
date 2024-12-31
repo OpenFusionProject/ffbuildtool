@@ -167,6 +167,10 @@ impl Version {
         self.uuid
     }
 
+    pub fn get_parent_uuid(&self) -> Option<Uuid> {
+        self.parent_uuid
+    }
+
     pub fn get_name(&self) -> Option<&str> {
         self.name.as_deref()
     }
