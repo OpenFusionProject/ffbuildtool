@@ -122,7 +122,7 @@ impl AssetBundle {
     }
 
     #[cfg(feature = "lzma")]
-    pub async fn get_uncompressed_info(&self) -> Result<HashMap<String, FileInfo>, Error> {
+    pub fn get_uncompressed_info(&self) -> Result<HashMap<String, FileInfo>, Error> {
         let files = self.get_file_entries()?;
         let result = files
             .into_iter()

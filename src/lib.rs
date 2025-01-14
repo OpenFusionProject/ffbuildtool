@@ -586,7 +586,7 @@ impl BundleInfo {
         }
 
         #[cfg(feature = "lzma")]
-        let uncompressed_info = bundle.get_uncompressed_info().await?;
+        let uncompressed_info = bundle.get_uncompressed_info()?;
 
         #[cfg(not(feature = "lzma"))]
         let uncompressed_info = HashMap::new();
