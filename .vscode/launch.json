@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["download-build", "-m", "manifest_104.json", "-o", "idk"],
+            "args": ["extract-bundle", "-b", "main104.unity3d"],
             "env": {
                 "RUST_LOG": "debug",
                 "RUST_LOG_STYLE": "always"

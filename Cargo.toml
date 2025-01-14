@@ -15,6 +15,7 @@ tokio = { version = "1.41.1", features = ["full"] }
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 clap = { version = "4.5.20", features = ["derive"], optional = true }
 indicatif = { version = "0.17.9", features = ["tokio", "improved_unicode"], optional = true }
+countio = { version = "0.2.19", optional = true }
 futures-util = "0.3.31"
 
 [lib]
@@ -22,7 +23,7 @@ name = "ffbuildtool"
 
 [features]
 default = ["lzma", "cli"]
-lzma = ["dep:rust-lzma"]
+lzma = ["dep:rust-lzma", "dep:countio"]
 cli = ["dep:clap", "dep:indicatif"]
 
 [[bin]]

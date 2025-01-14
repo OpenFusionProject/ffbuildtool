@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use ffbuildtool::{bundle::AssetBundle, util, Version};
+use ffbuildtool::{util, Version};
 
 use log::*;
 
@@ -19,8 +19,8 @@ async fn main() {
         std::fs::remove_dir_all(output_dir).ok();
 
         let time = std::time::Instant::now();
-        let asset = AssetBundle::from_file(&asset_path).unwrap();
-        asset.extract_files(output_dir).unwrap();
+        let asset = ffbuildtool::bundle::AssetBundleReader::from_file(&asset_path).unwrap();
+        asset.extract_all_files(output_dir).unwrap();
         info!("Extraction took {:?}", time.elapsed());
 
         let version = Version::from_manifest_file("example_manifest.json").unwrap();
