@@ -102,9 +102,9 @@ struct ExtractBundleArgs {
     #[clap(short = 'b', long)]
     bundle_path: String,
 
-    /// Path to the output directory. Outputs will be stored under another directory named after the bundle
+    /// Path to the output directory. If not specified, will be extracted to a directory named after the bundle.
     #[clap(short = 'o', long)]
-    output_dir: String,
+    output_dir: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -326,11 +326,24 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
 
 #[cfg(feature = "lzma")]
 async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), Error> {
-    use ffbuildtool::bundle::AssetBundle;
-    println!(
-        "Extracting bundle {} to {}",
-        args.bundle_path, args.output_dir
-    );
+    use std::path::PathBuf;
+
+    use ffbuildtool::{bundle::AssetBundle, util};
+
+    let output_dir = args.output_dir.unwrap_or({
+        let bundle_name = util::get_file_name_without_parent(&args.bundle_path);
+        let bundle_name_url_encoded = util::url_encode(bundle_name);
+        let bundle_path = PathBuf::from(&args.bundle_path);
+        bundle_path
+            .parent()
+            .unwrap_or(&bundle_path)
+            .join(bundle_name_url_encoded)
+            .to_string_lossy()
+            .to_string()
+    });
+
+    println!("Extracting bundle {} to {}", args.bundle_path, output_dir);
+
     let asset_bundle = AssetBundle::from_file(&args.bundle_path)?;
-    asset_bundle.extract_files(&args.output_dir)
+    asset_bundle.extract_files(&output_dir)
 }
