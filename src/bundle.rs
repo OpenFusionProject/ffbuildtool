@@ -1,178 +1,238 @@
-#![allow(dead_code)]
-
-#[cfg(feature = "lzma")]
 use std::{
     collections::HashMap,
-    io::{Read as _, Seek as _},
-    path::PathBuf,
+    fs::File,
+    io::{BufRead, BufReader, Read},
+    path::Path,
 };
 
-use log::*;
+use crate::{Error, FileInfo};
 
-use crate::{util, Error};
+const EXPECTED_SIGNATURE: &str = "UnityWeb";
+const EXPECTED_STREAM_VERSION: u32 = 2;
+const EXPECTED_PLAYER_VERSION: &str = "fusion-2.x.x";
+const EXPECTED_ENGINE_VERSION_BASE: &str = "2.5";
 
-#[cfg(feature = "lzma")]
-use crate::FileInfo;
+fn read_u32<R: Read>(reader: &mut R, counter: &mut usize) -> Result<u32, Error> {
+    let mut buf = [0; 4];
+    reader.read_exact(&mut buf)?;
+    let val = u32::from_be_bytes(buf);
+    *counter += 4;
+    Ok(val)
+}
+
+fn read_stringz<R: BufRead>(reader: &mut R, counter: &mut usize) -> Result<String, Error> {
+    let mut buf = Vec::new();
+    let bytes_read = reader.read_until(0, &mut buf)?;
+    buf.pop(); // Remove the null terminator
+    let string = String::from_utf8(buf)?;
+    *counter += bytes_read;
+    Ok(string)
+}
 
 #[derive(Debug)]
-pub struct AssetBundle {
-    path: String,
-    //
+struct ChunkMetadata {
+    compressed_size: u32,   // 4-byte aligned?
+    uncompressed_size: u32, // 4-byte aligned?
+}
+
+#[derive(Debug)]
+struct AssetBundleHeader {
     signature: String,
-    format: u32,
+    stream_version: u32,
     player_version: String,
     engine_version: String,
-    file_size1: u32,
-    data_offset: u32,
-    unknown1: u32,
-    offsets: Vec<FileOffsets>,
-    file_size2: Option<u32>,
+    minimum_streamed_bytes: u32,
+    total_header_size: u32, // 4-byte aligned
+    chunks_to_stream: u32,
+    chunk_count: u32,
+    chunk_metadata: Vec<ChunkMetadata>,
+    total_bytes: u32,
 }
+impl AssetBundleHeader {
+    fn read<R: BufRead>(reader: &mut R, file_size: u32) -> Result<Self, Error> {
+        let mut counter = 0;
 
-#[derive(Debug)]
-struct FileOffsets {
-    compressed_offset: u32,
-    uncompressed_offset: u32,
-}
-
-#[derive(Debug)]
-struct BundleFile {
-    name: String,
-    data: Vec<u8>,
-}
-
-impl AssetBundle {
-    pub fn get_file_size(&self) -> u64 {
-        // In the one case where file_size1 and file_size2 differ, I noticed
-        // that file_size2 is the one thata matches the actual file size.
-        self.file_size2.unwrap_or(self.file_size1) as u64
-    }
-
-    /// Returns the name of the file that this AssetBundle was created from.
-    pub fn get_file_name(&self) -> &str {
-        util::get_file_name_without_parent(&self.path)
-    }
-
-    pub fn from_file(path: &str) -> Result<Self, Error> {
-        let mut file = std::fs::File::open(path)?;
-        let mut reader = std::io::BufReader::new(&mut file);
-
-        let signature = util::read_stringz(&mut reader)?;
-        if signature != "UnityWeb" {
-            return Err(format!("Invalid signature: {}, should be UnityWeb", signature).into());
+        let signature = read_stringz(reader, &mut counter)?;
+        if signature != EXPECTED_SIGNATURE {
+            return Err(format!(
+                "Unexpected signature {}, expected {}",
+                signature, EXPECTED_SIGNATURE
+            )
+            .into());
         }
 
-        let format = util::read_u32(&mut reader)?;
-        if format != 2 {
-            warn!("Unexpected format: {}, expected 2 (for {})", format, path);
+        let stream_version = read_u32(reader, &mut counter)?;
+        if stream_version != EXPECTED_STREAM_VERSION {
+            return Err(format!(
+                "Unexpected stream version {}, expected {}",
+                stream_version, EXPECTED_STREAM_VERSION
+            )
+            .into());
         }
 
-        let player_version = util::read_stringz(&mut reader)?;
-        if player_version != "fusion-2.x.x" {
-            warn!(
-                "Unexpected player version: {}, expected fusion-2.x.x (for {})",
-                player_version, path
-            );
+        let player_version = read_stringz(reader, &mut counter)?;
+        if player_version != EXPECTED_PLAYER_VERSION {
+            return Err(format!(
+                "Unexpected player version {}, expected {}",
+                player_version, EXPECTED_PLAYER_VERSION
+            )
+            .into());
         }
 
-        let engine_version = util::read_stringz(&mut reader)?;
+        let engine_version = read_stringz(reader, &mut counter)?;
+        if !engine_version.starts_with(EXPECTED_ENGINE_VERSION_BASE) {
+            return Err(format!(
+                "Unexpected engine version {}, expected {}*",
+                engine_version, EXPECTED_ENGINE_VERSION_BASE
+            )
+            .into());
+        }
 
-        let file_size1 = util::read_u32(&mut reader)?;
-        let data_offset = util::read_u32(&mut reader)?;
-        let unknown1 = util::read_u32(&mut reader)?;
-        let num_files = util::read_u32(&mut reader)?;
+        let minimum_streamed_bytes = read_u32(reader, &mut counter)?;
+        let total_header_size = read_u32(reader, &mut counter)?;
+        if total_header_size % 4 != 0 {
+            return Err(format!(
+                "Total header size {} is not 4-byte aligned",
+                total_header_size
+            )
+            .into());
+        }
 
-        assert!(unknown1 == num_files || unknown1 == 1);
+        let chunks_to_stream = read_u32(reader, &mut counter)?;
+        if chunks_to_stream != 1 {
+            return Err(format!(
+                "Expected only one chunk to stream, but got {}",
+                chunks_to_stream
+            )
+            .into());
+        }
 
-        let mut offsets = Vec::new();
-        for _ in 0..num_files {
-            let compressed_offset = util::read_u32(&mut reader)?;
-            let uncompressed_offset = util::read_u32(&mut reader)?;
-            offsets.push(FileOffsets {
-                compressed_offset,
-                uncompressed_offset,
+        let chunk_count = read_u32(reader, &mut counter)?;
+        if chunk_count != 1 {
+            return Err(format!("Expected only one chunk, but got {}", chunk_count).into());
+        }
+
+        if chunk_count < chunks_to_stream {
+            return Err(format!(
+                "Chunk count {} is less than chunks to stream {}",
+                chunk_count, chunks_to_stream
+            )
+            .into());
+        }
+
+        let mut chunk_metadata = Vec::new();
+        for _ in 0..chunk_count {
+            let compressed_size = read_u32(reader, &mut counter)?;
+            let uncompressed_size = read_u32(reader, &mut counter)?;
+            chunk_metadata.push(ChunkMetadata {
+                compressed_size,
+                uncompressed_size,
             });
         }
 
-        let file_size2 = if format >= 2 {
-            let size = util::read_u32(&mut reader)?;
-            if size != file_size1 {
-                warn!(
-                    "File size 2 ({}) does not match file size 1 ({}) for {}",
-                    size, file_size1, path
-                );
+        let total_bytes = read_u32(reader, &mut counter)?;
+        if total_bytes != file_size {
+            return Err(format!(
+                "Total bytes {} does not match file size {}",
+                total_bytes, file_size
+            )
+            .into());
+        }
+
+        let bytes_left = total_header_size - counter as u32;
+        if bytes_left > 0 {
+            let mut buf = Vec::with_capacity(bytes_left as usize);
+            reader.read_exact(&mut buf)?;
+            let sum: u8 = buf.iter().sum();
+            if sum != 0 {
+                return Err(format!(
+                    "Expected {} bytes of padding, but got non-zero sum {}",
+                    bytes_left, sum
+                )
+                .into());
             }
-            Some(size)
-        } else {
-            None
-        };
+        }
 
         Ok(Self {
-            path: path.to_string(),
             signature,
-            format,
+            stream_version,
             player_version,
             engine_version,
-            file_size1,
-            data_offset,
-            unknown1,
-            offsets,
-            file_size2,
+            minimum_streamed_bytes,
+            total_header_size,
+            chunks_to_stream,
+            chunk_count,
+            chunk_metadata,
+            total_bytes,
         })
     }
 
-    #[cfg(feature = "lzma")]
-    pub fn get_uncompressed_info(&self) -> Result<HashMap<String, FileInfo>, Error> {
-        let files = self.get_file_entries()?;
-        let result = files
-            .into_iter()
-            .map(|file| (file.name, FileInfo::build_buffer(&file.data)))
-            .collect();
-        Ok(result)
+    fn get_total_compressed_size(&self) -> u32 {
+        self.chunk_metadata.iter().map(|x| x.compressed_size).sum()
     }
 
-    #[cfg(feature = "lzma")]
-    pub fn extract_files(&self, output_dir: &str) -> Result<(), Error> {
-        let url_encoded_name = util::url_encode(self.get_file_name());
-        let path = PathBuf::from(output_dir).join(url_encoded_name);
+    fn get_total_uncompressed_size(&self) -> u32 {
+        self.chunk_metadata
+            .iter()
+            .map(|x| x.uncompressed_size)
+            .sum()
+    }
+}
 
-        std::fs::create_dir_all(std::path::Path::new(&path))?;
-
-        let files = self.get_file_entries()?;
-        for file in files {
-            let file_id = format!("{}{}", output_dir, file.name);
-            let path = path.join(&file.name);
-            if let Err(e) = std::fs::write(&path, &file.data) {
-                warn!("Failed to write {}: {}", file_id, e);
-            } else {
-                info!("Extracted {}", file_id);
-            }
+#[derive(Debug)]
+pub struct AssetBundleReader {
+    header: AssetBundleHeader,
+    reader: BufReader<File>,
+    chunk_index: u32,
+    current_chunk: Vec<u8>,
+}
+impl AssetBundleReader {
+    pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self, Error> {
+        let metadata = std::fs::metadata(&file_path)?;
+        if !metadata.is_file() {
+            return Err(format!("{} is not a file", file_path.as_ref().display()).into());
         }
+
+        let file = File::open(&file_path)?;
+        let mut reader = BufReader::new(file);
+
+        let file_size = metadata.len() as u32;
+        let header = AssetBundleHeader::read(&mut reader, file_size)?;
+        dbg!(&header);
+
+        let current_chunk = Vec::with_capacity(header.get_total_uncompressed_size() as usize);
+
+        Ok(Self {
+            header,
+            reader,
+            chunk_index: 0,
+            current_chunk,
+        })
+    }
+
+    pub fn get_uncompressed_info(self) -> Result<HashMap<String, FileInfo>, Error> {
+        // todo
+        Ok(HashMap::new())
+    }
+
+    pub fn extract_all_files<P: AsRef<Path>>(self, output_dir_path: P) -> Result<(), Error> {
+        let metadata = std::fs::metadata(&output_dir_path)?;
+        if !metadata.is_dir() {
+            return Err(
+                format!("{} is not a directory", output_dir_path.as_ref().display()).into(),
+            );
+        }
+        // todo
         Ok(())
     }
 
-    #[cfg(feature = "lzma")]
-    fn get_file_entries(&self) -> Result<Vec<BundleFile>, Error> {
-        let mut file = std::fs::File::open(&self.path)?;
-        let mut reader = std::io::BufReader::new(&mut file);
-        reader.seek(std::io::SeekFrom::Start(self.data_offset as u64))?;
-        let mut buf = Vec::new();
-        reader.read_to_end(&mut buf)?;
-
-        let uncompressed = util::decompress(&buf)?;
-        let mut reader = std::io::BufReader::new(&uncompressed[..]);
-        let num_files = util::read_u32(&mut reader)?;
-
-        let mut files = Vec::with_capacity(num_files as usize);
-        for _ in 0..num_files {
-            let name = util::read_stringz(&mut reader)?;
-            let offset = util::read_u32(&mut reader)?;
-            let length = util::read_u32(&mut reader)?;
-            let data = uncompressed[offset as usize..(offset + length) as usize].to_vec();
-            let file = BundleFile { name, data };
-            files.push(file);
+    fn read_in_next_chunk(&mut self) -> Result<(), Error> {
+        if self.chunk_index >= self.header.chunk_count {
+            return Err("No more chunks to read".into());
         }
 
-        Ok(files)
+        // todo
+
+        Ok(())
     }
 }

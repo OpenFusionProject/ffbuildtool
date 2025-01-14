@@ -1,4 +1,4 @@
-use std::io::{BufRead, Write as _};
+use std::io::Write as _;
 
 use futures_util::StreamExt;
 use log::*;
@@ -116,35 +116,6 @@ impl TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
-    }
-}
-
-pub fn read_u32<T: BufRead>(reader: &mut T) -> Result<u32, Error> {
-    let mut buf = [0; 4];
-    reader.read_exact(&mut buf)?;
-    let val = u32::from_be_bytes(buf);
-    Ok(val)
-}
-
-pub fn read_u8<T: BufRead>(reader: &mut T) -> Result<u8, Error> {
-    let mut buf = [0; 1];
-    reader.read_exact(&mut buf)?;
-    Ok(buf[0])
-}
-
-pub fn read_stringz<T: BufRead>(reader: &mut T) -> Result<String, Error> {
-    let mut buf = Vec::new();
-    reader.read_until(0, &mut buf)?;
-    buf.pop(); // Remove the null terminator
-    let string = String::from_utf8(buf)?;
-    Ok(string)
-}
-
-#[cfg(feature = "lzma")]
-pub fn decompress(data: &[u8]) -> Result<Vec<u8>, Error> {
-    match lzma::decompress(data) {
-        Ok(decompressed) => Ok(decompressed),
-        Err(e) => Err(e.to_string().into()),
     }
 }
 
