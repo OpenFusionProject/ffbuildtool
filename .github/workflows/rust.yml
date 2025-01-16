@@ -13,6 +13,8 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
+    - name: apt install
+      run: sudo apt-get update && sudo apt-get install -y liblzma-dev
     - uses: actions/checkout@v4
     - name: Build slim
       run: cargo build --no-default-features --verbose
