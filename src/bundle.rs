@@ -384,14 +384,16 @@ impl AssetBundle {
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let mut buf = Vec::new();
         let mut buf_writer = Counter::new(&mut buf);
+        let mut uncompressed_bytes_written = 0;
 
         let mut level_ends = Vec::new();
         for level in &self.levels {
-            let uncompressed_end = level.write(&mut buf_writer)?;
-            let compressed_end = buf_writer.writer_bytes();
+            uncompressed_bytes_written += level.write(&mut buf_writer)?;
+            let uncompressed_end = uncompressed_bytes_written as u32;
+            let compressed_end = buf_writer.writer_bytes() as u32;
             level_ends.push(LevelEnds {
-                uncompressed_end: uncompressed_end as u32,
-                compressed_end: compressed_end as u32,
+                uncompressed_end,
+                compressed_end,
             });
         }
 
