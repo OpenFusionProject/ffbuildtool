@@ -1,15 +1,13 @@
-#![allow(dead_code)]
-
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     path::Path,
 };
 
 use countio::Counter;
 use log::*;
-use lzma::LzmaReader;
+use lzma::{LzmaReader, LzmaWriter};
 
 use crate::{util, Error, FileInfo};
 
@@ -20,10 +18,9 @@ fn read_u32<T: Read>(reader: &mut T) -> Result<u32, Error> {
     Ok(val)
 }
 
-fn read_u8<T: Read>(reader: &mut T) -> Result<u8, Error> {
-    let mut buf = [0; 1];
-    reader.read_exact(&mut buf)?;
-    Ok(buf[0])
+fn write_u32<T: Write>(writer: &mut T, value: u32) -> Result<(), Error> {
+    writer.write_all(&value.to_be_bytes())?;
+    Ok(())
 }
 
 fn read_stringz<T: BufRead>(reader: &mut T) -> Result<String, Error> {
@@ -34,17 +31,35 @@ fn read_stringz<T: BufRead>(reader: &mut T) -> Result<String, Error> {
     Ok(string)
 }
 
+fn write_stringz<T: Write>(writer: &mut T, string: &str) -> Result<(), Error> {
+    writer.write_all(&[string.as_bytes(), &[0]].concat())?;
+    Ok(())
+}
+
 fn skip_exact<T: Read>(reader: &mut T, count: usize) -> Result<(), Error> {
     let mut buf = vec![0; count];
     reader.read_exact(&mut buf)?;
     Ok(())
 }
 
+fn align<T: Into<usize> + From<usize>>(value: T, alignment: T) -> T {
+    let value = value.into();
+    let alignment = alignment.into();
+    let aligned = (value + alignment - 1) & !(alignment - 1);
+    aligned.into()
+}
+
 #[derive(Debug)]
 struct LevelEnds {
-    compressed_offset: u32,
-    uncompressed_offset: u32,
+    compressed_end: u32,
+    uncompressed_end: u32,
 }
+
+const EXPECTED_SIGNATURE: &str = "UnityWeb";
+const EXPECTED_STREAM_VERSION: u32 = 2;
+const EXPECTED_PLAYER_VERSION: &str = "fusion-2.x.x";
+const EXPECTED_ENGINE_VERSION_BASE: &str = "2";
+const DEFAULT_ENGINE_VERSION: &str = "2.5.4b5";
 
 #[derive(Debug)]
 pub struct AssetBundleHeader {
@@ -60,13 +75,25 @@ pub struct AssetBundleHeader {
     bundle_size: u32,
 }
 impl AssetBundleHeader {
-    fn read<R: Read + BufRead>(reader: &mut R) -> Result<Self, Error> {
-        const EXPECTED_SIGNATURE: &str = "UnityWeb";
-        const EXPECTED_STREAM_VERSION: u32 = 2;
-        const EXPECTED_PLAYER_VERSION: &str = "fusion-2.x.x";
-        const EXPECTED_ENGINE_VERSION_BASE: &str = "2";
-        const DEFAULT_ENGINE_VERSION: &str = "2.5.4b5";
+    fn new(level_ends: Vec<LevelEnds>) -> Self {
+        let num_levels = level_ends.len() as u32;
+        let mut header = Self {
+            signature: EXPECTED_SIGNATURE.to_string(),
+            stream_version: EXPECTED_STREAM_VERSION,
+            player_version: EXPECTED_PLAYER_VERSION.to_string(),
+            engine_version: DEFAULT_ENGINE_VERSION.to_string(),
+            num_levels,
+            min_levels_for_load: 1,
+            level_ends,
+            bundle_size: 0,
+            min_streamed_bytes: 0,
+            header_size: 0,
+        };
+        header.update_sizes();
+        header
+    }
 
+    fn read<R: Read + BufRead>(reader: &mut R) -> Result<Self, Error> {
         let signature = read_stringz(reader)?;
         if signature != EXPECTED_SIGNATURE {
             return Err(format!(
@@ -117,11 +144,11 @@ impl AssetBundleHeader {
 
         let mut level_ends = Vec::with_capacity(num_levels as usize);
         for _ in 0..num_levels {
-            let compressed_offset = read_u32(reader)?;
-            let uncompressed_offset = read_u32(reader)?;
+            let compressed_end = read_u32(reader)?;
+            let uncompressed_end = read_u32(reader)?;
             level_ends.push(LevelEnds {
-                compressed_offset,
-                uncompressed_offset,
+                compressed_end,
+                uncompressed_end,
             });
         }
 
@@ -139,6 +166,51 @@ impl AssetBundleHeader {
             level_ends,
             bundle_size,
         })
+    }
+
+    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        let mut writer = Counter::new(writer);
+
+        write_stringz(&mut writer, &self.signature)?;
+        write_u32(&mut writer, self.stream_version)?;
+        write_stringz(&mut writer, &self.player_version)?;
+        write_stringz(&mut writer, &self.engine_version)?;
+        write_u32(&mut writer, self.min_streamed_bytes)?;
+        write_u32(&mut writer, self.header_size)?;
+        write_u32(&mut writer, self.min_levels_for_load)?;
+        write_u32(&mut writer, self.num_levels)?;
+        for level in &self.level_ends {
+            write_u32(&mut writer, level.compressed_end)?;
+            write_u32(&mut writer, level.uncompressed_end)?;
+        }
+        write_u32(&mut writer, self.bundle_size)?;
+
+        // padding
+        let padding_size = self.header_size as usize - writer.writer_bytes();
+        writer.write_all(&vec![0; padding_size])?;
+
+        Ok(())
+    }
+
+    fn get_size(&self) -> usize {
+        let size = self.signature.len() + 1 // signature (+ null byte)
+            + 4 // stream_version
+            + self.player_version.len() + 1 // player_version (+ null byte)
+            + self.engine_version.len() + 1 // engine_version (+ null byte)
+            + 4 // min_streamed_bytes
+            + 4 // header_size
+            + 4 // min_levels_for_load
+            + 4 // num_levels
+            + self.level_ends.len() * 8 // level_ends
+            + 4; // bundle_size
+        align(size, 4)
+    }
+
+    fn update_sizes(&mut self) {
+        self.header_size = self.get_size() as u32;
+        self.bundle_size =
+            self.header_size + self.level_ends.last().map_or(0, |l| l.compressed_end);
+        self.min_streamed_bytes = self.bundle_size;
     }
 }
 
@@ -165,6 +237,16 @@ impl LevelHeader {
             files.push(LevelFileMetadata { name, offset, size });
         }
         Ok(Self { num_files, files })
+    }
+
+    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        write_u32(writer, self.num_files)?;
+        for file in &self.files {
+            write_stringz(writer, &file.name)?;
+            write_u32(writer, file.offset)?;
+            write_u32(writer, file.size)?;
+        }
+        Ok(())
     }
 }
 
@@ -203,6 +285,58 @@ impl Level {
         }
         Ok(Self { files })
     }
+
+    fn write<W: Write>(&self, writer: &mut W) -> Result<usize, Error> {
+        let mut writer = Counter::new(LzmaWriter::new_compressor(writer, 6)?);
+        let header = self.gen_header();
+        header.write(&mut writer)?;
+
+        for (idx, file) in header.files.iter().enumerate() {
+            let padding_size = file.offset as usize - writer.writer_bytes();
+            writer.write_all(&vec![0; padding_size])?;
+            writer.write_all(&self.files[idx].data)?;
+        }
+
+        // pad to 4 bytes
+        let level_size = writer.writer_bytes();
+        let padding_size = align(level_size, 4) - level_size;
+        writer.write_all(&vec![0; padding_size])?;
+
+        Ok(writer.writer_bytes())
+    }
+
+    fn gen_header(&self) -> LevelHeader {
+        let mut files = Vec::with_capacity(self.files.len());
+
+        let header_size = self.get_header_size();
+        let mut offset = align(header_size, 4);
+        for file in &self.files {
+            let size = file.data.len();
+            files.push(LevelFileMetadata {
+                name: file.name.clone(),
+                offset: offset as u32,
+                size: size as u32,
+            });
+
+            // always align to 4 bytes for the next file
+            offset = align(offset + size, 4);
+        }
+
+        LevelHeader {
+            num_files: self.files.len() as u32,
+            files,
+        }
+    }
+
+    fn get_header_size(&self) -> usize {
+        4 // num_files
+            + self.files.iter().map(|file| {
+                file.name.len() + 1 // name (+ null byte)
+                    + 4 // offset
+                    + 4 // size
+            })
+            .sum::<usize>()
+    }
 }
 
 #[derive(Debug)]
@@ -210,17 +344,14 @@ pub struct AssetBundle {
     levels: Vec<Level>,
 }
 impl AssetBundle {
-    pub fn from_file(path: &str) -> Result<Self, Error> {
-        let file = File::open(path)?;
-        let metadata = file.metadata()?;
-        let mut reader = Counter::new(BufReader::new(file));
+    fn read<R: Read + BufRead>(reader: &mut R, expected_size: u32) -> Result<Self, Error> {
+        let mut reader = Counter::new(reader);
 
         let header = AssetBundleHeader::read(&mut reader)?;
-        if header.bundle_size != metadata.len() as u32 {
+        if header.bundle_size != expected_size {
             warn!(
                 "Bundle size mismatch: {} != {}",
-                header.bundle_size,
-                metadata.len()
+                header.bundle_size, expected_size
             );
         }
 
@@ -239,7 +370,7 @@ impl AssetBundle {
                 let offset = reader.reader_bytes();
                 skip_exact(
                     &mut reader,
-                    header.level_ends[i as usize + 1].compressed_offset as usize - offset,
+                    header.level_ends[i as usize + 1].compressed_end as usize - offset,
                 )?;
             }
         }
@@ -248,6 +379,41 @@ impl AssetBundle {
         dbg!(&levels);
 
         Ok(Self { levels })
+    }
+
+    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        let mut buf = Vec::new();
+        let mut buf_writer = Counter::new(&mut buf);
+
+        let mut level_ends = Vec::new();
+        for level in &self.levels {
+            let uncompressed_end = level.write(&mut buf_writer)?;
+            let compressed_end = buf_writer.writer_bytes();
+            level_ends.push(LevelEnds {
+                uncompressed_end: uncompressed_end as u32,
+                compressed_end: compressed_end as u32,
+            });
+        }
+
+        let header = AssetBundleHeader::new(level_ends);
+        header.write(writer)?;
+        writer.write_all(&buf)?;
+        Ok(())
+    }
+
+    pub fn from_file(path: &str) -> Result<Self, Error> {
+        let file = File::open(path)?;
+        let metadata = file.metadata()?;
+        let mut reader = BufReader::new(file);
+        Self::read(&mut reader, metadata.len() as u32)
+    }
+
+    pub fn to_file(&self, path: &str) -> Result<(), Error> {
+        let file = File::create(path)?;
+        let mut writer = BufWriter::new(file);
+        self.write(&mut writer)?;
+        writer.flush()?;
+        Ok(())
     }
 
     pub fn get_uncompressed_info(&self, level: usize) -> Result<HashMap<String, FileInfo>, Error> {
