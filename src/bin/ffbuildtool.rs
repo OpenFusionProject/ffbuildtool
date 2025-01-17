@@ -328,11 +328,10 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
 async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), Error> {
     use std::path::PathBuf;
 
-    use ffbuildtool::{bundle::AssetBundle, util};
-
+    let asset_bundle = ffbuildtool::bundle::AssetBundle::from_file(&args.bundle_path)?;
     let output_dir = args.output_dir.unwrap_or({
-        let bundle_name = util::get_file_name_without_parent(&args.bundle_path);
-        let bundle_name_url_encoded = util::url_encode(bundle_name);
+        let bundle_name = ffbuildtool::util::get_file_name_without_parent(&args.bundle_path);
+        let bundle_name_url_encoded = ffbuildtool::util::url_encode(bundle_name);
         let bundle_path = PathBuf::from(&args.bundle_path);
         bundle_path
             .parent()
@@ -341,9 +340,6 @@ async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), Error> {
             .to_string_lossy()
             .to_string()
     });
-
     println!("Extracting bundle {} to {}", args.bundle_path, output_dir);
-
-    let asset_bundle = AssetBundle::from_file(&args.bundle_path)?;
     asset_bundle.extract_files(&output_dir)
 }

@@ -1,4 +1,4 @@
-use std::io::{BufRead, Write as _};
+use std::{fs::File, io::Write as _, path::Path};
 
 use futures_util::StreamExt;
 use log::*;
@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{Error, ItemProgress, ProgressCallback};
 
 pub fn get_file_hash(file_path: &str) -> Result<String, Error> {
-    let file = std::fs::File::open(file_path)?;
+    let file = File::open(file_path)?;
     let mut reader = std::io::BufReader::new(file);
     let mut hasher = Sha256::new();
     std::io::copy(&mut reader, &mut hasher)?;
@@ -23,20 +23,20 @@ pub fn get_buffer_hash(buffer: &[u8]) -> String {
 }
 
 pub fn get_file_extension(file_path: &str) -> Option<&str> {
-    std::path::Path::new(file_path)
+    Path::new(file_path)
         .extension()
         .and_then(|ext| ext.to_str())
 }
 
 pub fn get_file_name_without_extension(file_path: &str) -> &str {
-    std::path::Path::new(file_path)
+    Path::new(file_path)
         .file_stem()
         .and_then(|name| name.to_str())
         .unwrap_or(file_path)
 }
 
 pub fn get_file_name_without_parent(file_path: &str) -> &str {
-    std::path::Path::new(file_path)
+    Path::new(file_path)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(file_path)
@@ -70,7 +70,7 @@ impl TempFile {
         let response = reqwest::get(url).await?;
         let filename = Uuid::new_v4().to_string();
         let path = std::env::temp_dir().join(filename);
-        let mut file = std::fs::File::create(&path)?;
+        let mut file = File::create(&path)?;
         let bytes = response.bytes().await?;
         drop(permit);
 
@@ -117,27 +117,6 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
     }
-}
-
-pub fn read_u32<T: BufRead>(reader: &mut T) -> Result<u32, Error> {
-    let mut buf = [0; 4];
-    reader.read_exact(&mut buf)?;
-    let val = u32::from_be_bytes(buf);
-    Ok(val)
-}
-
-pub fn read_u8<T: BufRead>(reader: &mut T) -> Result<u8, Error> {
-    let mut buf = [0; 1];
-    reader.read_exact(&mut buf)?;
-    Ok(buf[0])
-}
-
-pub fn read_stringz<T: BufRead>(reader: &mut T) -> Result<String, Error> {
-    let mut buf = Vec::new();
-    reader.read_until(0, &mut buf)?;
-    buf.pop(); // Remove the null terminator
-    let string = String::from_utf8(buf)?;
-    Ok(string)
 }
 
 pub fn url_encode(input: &str) -> String {
@@ -243,13 +222,22 @@ pub async fn download_to_file(
     Ok(())
 }
 
+pub fn create_dir_if_needed(path: &str) -> Result<(), Error> {
+    if !std::fs::exists(path)? {
+        std::fs::create_dir_all(path)?;
+    }
+    Ok(())
+}
+
 pub fn copy_dir(from: &str, to: &str, recursive: bool) -> Result<(), Error> {
-    let from = std::path::Path::new(from);
-    let to = std::path::Path::new(to);
+    let from = Path::new(from);
+    let to = Path::new(to);
+
+    if !from.exists() {
+        return Ok(());
+    }
+
     if from.is_dir() {
-        if !from.exists() {
-            std::fs::create_dir_all(to)?;
-        }
         for entry in std::fs::read_dir(from)? {
             let entry = entry?;
             let path = entry.path();

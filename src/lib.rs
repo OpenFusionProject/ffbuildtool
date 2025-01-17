@@ -532,7 +532,7 @@ impl Version {
         callback: Option<ProgressCallback>,
     ) -> Result<(), Error> {
         info!("Downloading build {} to {}", self.uuid, path,);
-        let _ = std::fs::remove_dir_all(path);
+        std::fs::remove_dir_all(path)?;
         std::fs::create_dir_all(path)?;
         self.repair(path, callback).await?;
         info!("Download complete");
@@ -580,7 +580,8 @@ impl BundleInfo {
         #[cfg(feature = "lzma")]
         let uncompressed_info = {
             let bundle = bundle::AssetBundle::from_file(&file_path)?;
-            bundle.get_uncompressed_info()?
+            // ff assets are always in level 0
+            bundle.get_uncompressed_info(0)?
         };
 
         #[cfg(not(feature = "lzma"))]
@@ -743,13 +744,6 @@ impl FileInfo {
         };
         // if we can't access the file, assume it's corrupt
         build_file_internal().unwrap_or_default()
-    }
-
-    #[cfg(feature = "lzma")]
-    fn build_buffer(buffer: &[u8]) -> Self {
-        let hash = util::get_buffer_hash(buffer);
-        let size = buffer.len() as u64;
-        Self { hash, size }
     }
 
     fn validate(&self, good: &Self) -> Result<(), FailReason> {
