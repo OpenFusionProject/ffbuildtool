@@ -7,7 +7,6 @@ use std::{
     },
 };
 
-use bundle::AssetBundle;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::Semaphore, task::JoinHandle};
 use util::TempFile;
@@ -17,8 +16,10 @@ use log::*;
 
 pub type Error = Box<dyn std::error::Error>;
 
-pub mod bundle;
 pub mod util;
+
+#[cfg(feature = "lzma")]
+pub mod bundle;
 
 #[cfg(test)]
 mod tests;
@@ -575,18 +576,12 @@ impl BundleInfo {
         let file_path = format!("{}/{}", asset_root, bundle_name);
 
         let compressed_info = FileInfo::build(&file_path).await?;
-        let bundle = AssetBundle::from_file(&file_path)?;
-        if bundle.get_file_size() != compressed_info.size {
-            warn!(
-                "File size mismatch: {} (header) vs {} (actual) for {}",
-                bundle.get_file_size(),
-                compressed_info.size,
-                bundle_name
-            );
-        }
 
         #[cfg(feature = "lzma")]
-        let uncompressed_info = bundle.get_uncompressed_info()?;
+        let uncompressed_info = {
+            let bundle = bundle::AssetBundle::from_file(&file_path)?;
+            bundle.get_uncompressed_info()?
+        };
 
         #[cfg(not(feature = "lzma"))]
         let uncompressed_info = HashMap::new();

@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::{
-    bundle::AssetBundle,
     util::{self, TempDir},
     Version,
 };
@@ -95,7 +94,7 @@ async fn test_extract_bundle() {
     let bundle_path = "example_builds/compressed/good/Map_00_00.unity3d";
     let output_dir = TempDir::new();
 
-    let asset_bundle = AssetBundle::from_file(bundle_path).unwrap();
+    let asset_bundle = crate::bundle::AssetBundle::from_file(bundle_path).unwrap();
     asset_bundle.extract_files(output_dir.path()).unwrap();
     let output_files_dir =
         PathBuf::from(output_dir.path()).join(util::url_encode("Map_00_00.unity3d"));

@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-#[cfg(feature = "lzma")]
 use std::{
     collections::HashMap,
     io::{Read as _, Seek as _},
@@ -9,10 +8,7 @@ use std::{
 
 use log::*;
 
-use crate::{util, Error};
-
-#[cfg(feature = "lzma")]
-use crate::FileInfo;
+use crate::{util, Error, FileInfo};
 
 #[derive(Debug)]
 pub struct AssetBundle {
@@ -121,7 +117,6 @@ impl AssetBundle {
         })
     }
 
-    #[cfg(feature = "lzma")]
     pub fn get_uncompressed_info(&self) -> Result<HashMap<String, FileInfo>, Error> {
         let files = self.get_file_entries()?;
         let result = files
@@ -131,7 +126,6 @@ impl AssetBundle {
         Ok(result)
     }
 
-    #[cfg(feature = "lzma")]
     pub fn extract_files(&self, output_dir: &str) -> Result<(), Error> {
         let url_encoded_name = util::url_encode(self.get_file_name());
         let path = PathBuf::from(output_dir).join(url_encoded_name);
@@ -151,7 +145,6 @@ impl AssetBundle {
         Ok(())
     }
 
-    #[cfg(feature = "lzma")]
     fn get_file_entries(&self) -> Result<Vec<BundleFile>, Error> {
         let mut file = std::fs::File::open(&self.path)?;
         let mut reader = std::io::BufReader::new(&mut file);
@@ -159,7 +152,7 @@ impl AssetBundle {
         let mut buf = Vec::new();
         reader.read_to_end(&mut buf)?;
 
-        let uncompressed = util::decompress(&buf)?;
+        let uncompressed = lzma::decompress(&buf)?;
         let mut reader = std::io::BufReader::new(&uncompressed[..]);
         let num_files = util::read_u32(&mut reader)?;
 
