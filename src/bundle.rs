@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{BufRead, BufReader, BufWriter, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use countio::Counter;
@@ -73,6 +73,27 @@ pub struct AssetBundleHeader {
     min_levels_for_load: u32,
     level_ends: Vec<LevelEnds>,
     bundle_size: u32,
+}
+impl std::fmt::Display for AssetBundleHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Signature: {}", self.signature)?;
+        writeln!(f, "Stream version: {}", self.stream_version)?;
+        writeln!(f, "Player version: {}", self.player_version)?;
+        writeln!(f, "Engine version: {}", self.engine_version)?;
+        writeln!(f, "Min streamed bytes: {}", self.min_streamed_bytes)?;
+        writeln!(f, "Header size: {}", self.header_size)?;
+        writeln!(f, "Number of levels: {}", self.num_levels)?;
+        writeln!(f, "Min levels for load: {}", self.min_levels_for_load)?;
+        writeln!(f, "Level ends:")?;
+        for (i, level) in self.level_ends.iter().enumerate() {
+            writeln!(
+                f,
+                "  Level {}: compressed @ {}, uncompressed @ {}",
+                i, level.compressed_end, level.uncompressed_end
+            )?;
+        }
+        write!(f, "Bundle size: {}", self.bundle_size)
+    }
 }
 impl AssetBundleHeader {
     fn new(level_ends: Vec<LevelEnds>) -> Self {
@@ -253,13 +274,45 @@ impl LevelHeader {
 struct LevelFile {
     name: String,
     data: Vec<u8>,
+    hash: Option<String>,
 }
 impl std::fmt::Debug for LevelFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LevelFile")
             .field("name", &self.name)
             .field("data", &format_args!("{} bytes", self.data.len()))
+            .field("hash", &self.hash)
             .finish()
+    }
+}
+impl std::fmt::Display for LevelFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.hash.as_ref() {
+            Some(hash) => write!(
+                f,
+                "{} - {} ({} bytes) - {}",
+                self.name,
+                util::bytes_to_human_readable(self.data.len() as u64),
+                self.data.len(),
+                hash
+            ),
+            None => write!(
+                f,
+                "{} - {} ({} bytes)",
+                self.name,
+                util::bytes_to_human_readable(self.data.len() as u64),
+                self.data.len()
+            ),
+        }
+    }
+}
+impl LevelFile {
+    fn new(name: String, data: Vec<u8>) -> Self {
+        Self {
+            name,
+            data,
+            hash: None,
+        }
     }
 }
 
@@ -278,10 +331,7 @@ impl Level {
             skip_exact(&mut reader, file.offset as usize - offset)?;
             let mut data = vec![0; file.size as usize];
             reader.read_exact(&mut data)?;
-            files.push(LevelFile {
-                name: file.name,
-                data,
-            });
+            files.push(LevelFile::new(file.name, data));
         }
         Ok(Self { files })
     }
@@ -345,8 +395,23 @@ impl Level {
 pub struct AssetBundle {
     levels: Vec<Level>,
 }
+impl std::fmt::Display for AssetBundle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, level) in self.levels.iter().enumerate() {
+            writeln!(f, "Level {}", i)?;
+            for file in &level.files {
+                writeln!(f, "  {}", file)?;
+            }
+            write!(f, "End")?;
+        }
+        Ok(())
+    }
+}
 impl AssetBundle {
-    fn read<R: Read + BufRead>(reader: &mut R, expected_size: u32) -> Result<Self, Error> {
+    fn read<R: Read + BufRead>(
+        reader: &mut R,
+        expected_size: u32,
+    ) -> Result<(AssetBundleHeader, Self), Error> {
         let mut reader = Counter::new(reader);
 
         let header = AssetBundleHeader::read(&mut reader)?;
@@ -374,7 +439,7 @@ impl AssetBundle {
             }
         }
 
-        Ok(Self { levels })
+        Ok((header, Self { levels }))
     }
 
     fn write<W: Write>(&self, writer: &mut W, compression: u32) -> Result<(), Error> {
@@ -399,7 +464,27 @@ impl AssetBundle {
         Ok(())
     }
 
-    pub fn from_file(path: &str) -> Result<Self, String> {
+    fn get_level_files_from_dir(dir_path: &Path) -> Result<Vec<LevelFile>, Error> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(dir_path)? {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let path = entry.path();
+            if path.is_file() {
+                let Some(name) = path.file_name().unwrap().to_str() else {
+                    continue;
+                };
+                let Ok(data) = std::fs::read(&path) else {
+                    continue;
+                };
+                files.push(LevelFile::new(name.to_string(), data));
+            }
+        }
+        Ok(files)
+    }
+
+    pub fn from_file(path: &str) -> Result<(AssetBundleHeader, Self), String> {
         let file = File::open(path).map_err(|e| format!("Couldn't open file {}: {}", path, e))?;
         let metadata = file.metadata().unwrap();
         let mut reader = BufReader::new(file);
@@ -417,24 +502,6 @@ impl AssetBundle {
             .flush()
             .map_err(|e| format!("Couldn't finish writing bundle: {}", e))?;
         Ok(())
-    }
-
-    pub fn get_uncompressed_info(&self, level: usize) -> Result<HashMap<String, FileInfo>, Error> {
-        let mut result = HashMap::new();
-        if level >= self.levels.len() {
-            return Err(format!("Level {} does not exist", level).into());
-        }
-
-        for file in &self.levels[level].files {
-            let hash = util::get_buffer_hash(&file.data);
-            let info = FileInfo {
-                hash,
-                size: file.data.len() as u64,
-            };
-            result.insert(file.name.clone(), info);
-        }
-
-        Ok(result)
     }
 
     pub fn extract_files(&self, output_dir: &str) -> Result<(), String> {
@@ -457,5 +524,33 @@ impl AssetBundle {
             }
         }
         Ok(())
+    }
+
+    pub fn recalculate_all_hashes(&mut self) {
+        for level in &mut self.levels {
+            for file in &mut level.files {
+                file.hash = Some(util::get_buffer_hash(&file.data));
+            }
+        }
+    }
+
+    pub fn get_uncompressed_info(&self, level: usize) -> Result<HashMap<String, FileInfo>, Error> {
+        let mut result = HashMap::new();
+        if level >= self.levels.len() {
+            return Err(format!("Level {} does not exist", level).into());
+        }
+
+        for file in &self.levels[level].files {
+            let info = FileInfo {
+                hash: file
+                    .hash
+                    .clone()
+                    .unwrap_or_else(|| util::get_buffer_hash(&file.data)),
+                size: file.data.len() as u64,
+            };
+            result.insert(file.name.clone(), info);
+        }
+
+        Ok(result)
     }
 }

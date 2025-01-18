@@ -89,8 +89,8 @@ async fn test_extract_bundle() {
     let bundle_path = "example_builds/compressed/good/Map_00_00.unity3d";
     let output_dir = TempDir::new();
 
-    let asset_bundle = crate::bundle::AssetBundle::from_file(bundle_path).unwrap();
-    asset_bundle.extract_files(output_dir.path()).unwrap();
+    let (_, bundle) = crate::bundle::AssetBundle::from_file(bundle_path).unwrap();
+    bundle.extract_files(output_dir.path()).unwrap();
 
     let version = Version::from_manifest_file("example_manifest.json").unwrap();
     let bundle_info = version.get_bundle("Map_00_00.unity3d").unwrap();

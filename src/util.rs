@@ -265,3 +265,14 @@ pub fn file_path_to_uri(file_path: &str) -> String {
     // Add file:/// protocol
     format!("file:///{}", path)
 }
+
+pub fn bytes_to_human_readable(bytes: u64) -> String {
+    let units = ["B", "KB", "MB", "GB"];
+    let mut bytes = bytes as f64;
+    let mut unit = 0;
+    while bytes >= 1024.0 && unit < units.len() - 1 {
+        bytes /= 1024.0;
+        unit += 1;
+    }
+    format!("{:.2} {}", bytes, units[unit])
+}

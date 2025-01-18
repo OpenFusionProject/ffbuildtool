@@ -24,6 +24,8 @@ enum Commands {
     RepairBuild(RepairBuildArgs),
     ValidateBuild(ValidateBuildArgs),
     #[cfg(feature = "lzma")]
+    ReadBundle(ReadBundleArgs),
+    #[cfg(feature = "lzma")]
     ExtractBundle(ExtractBundleArgs),
 }
 
@@ -93,6 +95,18 @@ struct ValidateBuildArgs {
     /// Flag indicating that the bundles are uncompressed
     #[clap(short = 'u', long)]
     uncompressed: bool,
+}
+
+#[cfg(feature = "lzma")]
+#[derive(Args, Debug)]
+struct ReadBundleArgs {
+    /// Path to the compressed asset bundle
+    #[clap(short = 'b', long)]
+    bundle_path: String,
+
+    /// Whether to calculate the hashes of each file in the bundle
+    #[clap(short = 'c', long, action)]
+    calculate_hashes: bool,
 }
 
 #[cfg(feature = "lzma")]
@@ -219,6 +233,8 @@ async fn main() -> Result<(), String> {
         Commands::RepairBuild(args) => repair_build(args).await,
         Commands::ValidateBuild(args) => validate_build(args).await,
         #[cfg(feature = "lzma")]
+        Commands::ReadBundle(args) => read_bundle(args).await,
+        #[cfg(feature = "lzma")]
         Commands::ExtractBundle(args) => extract_bundle(args).await,
     }
 }
@@ -340,10 +356,34 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), String> {
 }
 
 #[cfg(feature = "lzma")]
-async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), String> {
-    use std::path::PathBuf;
+async fn read_bundle(args: ReadBundleArgs) -> Result<(), String> {
+    use std::time::Instant;
 
-    let asset_bundle = ffbuildtool::bundle::AssetBundle::from_file(&args.bundle_path)?;
+    let start = Instant::now();
+    let (header, mut bundle) = ffbuildtool::bundle::AssetBundle::from_file(&args.bundle_path)?;
+    println!("Bundle read in {}ms", start.elapsed().as_millis());
+
+    if args.calculate_hashes {
+        let start = Instant::now();
+        bundle.recalculate_all_hashes();
+        println!("Hashes calculated in {}ms", start.elapsed().as_millis());
+    }
+
+    println!(
+        "------------------------\n{}\n------------------------\n{}",
+        header, bundle
+    );
+    Ok(())
+}
+
+#[cfg(feature = "lzma")]
+async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), String> {
+    use std::{path::PathBuf, time::Instant};
+
+    let start = Instant::now();
+    let (_, bundle) = ffbuildtool::bundle::AssetBundle::from_file(&args.bundle_path)?;
+    println!("Bundle read in {}ms", start.elapsed().as_millis());
+
     let output_dir = args.output_dir.unwrap_or({
         let bundle_name = ffbuildtool::util::get_file_name_without_parent(&args.bundle_path);
         let bundle_name_url_encoded = ffbuildtool::util::url_encode(bundle_name);
@@ -356,5 +396,10 @@ async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), String> {
             .to_string()
     });
     println!("Extracting bundle {} to {}", args.bundle_path, output_dir);
-    asset_bundle.extract_files(&output_dir)
+
+    let start = Instant::now();
+    bundle.extract_files(&output_dir)?;
+    println!("Bundle extracted in {}ms", start.elapsed().as_millis());
+
+    Ok(())
 }

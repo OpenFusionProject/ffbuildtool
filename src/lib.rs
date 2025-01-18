@@ -579,7 +579,7 @@ impl BundleInfo {
 
         #[cfg(feature = "lzma")]
         let uncompressed_info = {
-            let bundle = bundle::AssetBundle::from_file(&file_path)?;
+            let (_, bundle) = bundle::AssetBundle::from_file(&file_path)?;
             // ff assets are always in level 0
             bundle.get_uncompressed_info(0)?
         };
