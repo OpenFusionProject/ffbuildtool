@@ -286,8 +286,8 @@ impl Level {
         Ok(Self { files })
     }
 
-    fn write<W: Write>(&self, writer: &mut W) -> Result<usize, Error> {
-        let mut writer = Counter::new(LzmaWriter::new_compressor(writer, 6)?);
+    fn write<W: Write>(&self, writer: &mut W, compression: u32) -> Result<usize, Error> {
+        let mut writer = Counter::new(LzmaWriter::new_compressor(writer, compression)?);
         let header = self.gen_header();
         header.write(&mut writer)?;
 
@@ -377,14 +377,14 @@ impl AssetBundle {
         Ok(Self { levels })
     }
 
-    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    fn write<W: Write>(&self, writer: &mut W, compression: u32) -> Result<(), Error> {
         let mut buf = Vec::new();
         let mut buf_writer = Counter::new(&mut buf);
         let mut uncompressed_bytes_written = 0;
 
         let mut level_ends = Vec::new();
         for level in &self.levels {
-            uncompressed_bytes_written += level.write(&mut buf_writer)?;
+            uncompressed_bytes_written += level.write(&mut buf_writer, compression)?;
             let uncompressed_end = uncompressed_bytes_written as u32;
             let compressed_end = buf_writer.writer_bytes() as u32;
             level_ends.push(LevelEnds {
@@ -407,11 +407,11 @@ impl AssetBundle {
             .map_err(|e| format!("Couldn't read bundle: {}", e))
     }
 
-    pub fn to_file(&self, path: &str) -> Result<(), String> {
+    pub fn to_file(&self, path: &str, compression_level: u32) -> Result<(), String> {
         let file =
             File::create(path).map_err(|e| format!("Couldn't create file {}: {}", path, e))?;
         let mut writer = BufWriter::new(file);
-        self.write(&mut writer)
+        self.write(&mut writer, compression_level)
             .map_err(|e| format!("Couldn't write bundle: {}", e))?;
         writer
             .flush()
