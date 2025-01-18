@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 log = "0.4.22"
 reqwest = { version = "0.12.9", features = ["stream"] }
-rust-lzma = { version = "0.6.0", optional = true }
+liblzma = { version = "0.3.5", features = ["static", "parallel"], optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0.132"
 sha2 = "0.10.8"
@@ -23,7 +23,7 @@ name = "ffbuildtool"
 
 [features]
 default = ["lzma", "cli"]
-lzma = ["dep:rust-lzma", "dep:countio"]
+lzma = ["dep:liblzma", "dep:countio"]
 cli = ["dep:clap", "dep:indicatif"]
 
 [[bin]]
