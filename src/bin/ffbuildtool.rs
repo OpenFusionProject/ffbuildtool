@@ -27,6 +27,8 @@ enum Commands {
     ReadBundle(ReadBundleArgs),
     #[cfg(feature = "lzma")]
     ExtractBundle(ExtractBundleArgs),
+    #[cfg(feature = "lzma")]
+    PackBundle(PackBundleArgs),
 }
 
 #[derive(Args, Debug)]
@@ -101,8 +103,8 @@ struct ValidateBuildArgs {
 #[derive(Args, Debug)]
 struct ReadBundleArgs {
     /// Path to the compressed asset bundle
-    #[clap(short = 'b', long)]
-    bundle_path: String,
+    #[clap(short = 'i', long)]
+    input_bundle: String,
 
     /// Whether to calculate the hashes of each file in the bundle
     #[clap(short = 'c', long, action)]
@@ -113,12 +115,28 @@ struct ReadBundleArgs {
 #[derive(Args, Debug)]
 struct ExtractBundleArgs {
     /// Path to the compressed asset bundle
-    #[clap(short = 'b', long)]
-    bundle_path: String,
+    #[clap(short = 'i', long)]
+    input_bundle: String,
 
     /// Path to the output directory. If not specified, will be extracted to a directory named after the bundle.
     #[clap(short = 'o', long)]
     output_dir: Option<String>,
+}
+
+#[cfg(feature = "lzma")]
+#[derive(Args, Debug)]
+struct PackBundleArgs {
+    /// Path to the input directory
+    #[clap(short = 'i', long)]
+    input_dir: String,
+
+    /// Path to the output bundle
+    #[clap(short = 'o', long)]
+    output_bundle: String,
+
+    /// Compression level to use
+    #[clap(short = 'l', long, default_value = "6")]
+    compression_level: u32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -236,6 +254,8 @@ async fn main() -> Result<(), String> {
         Commands::ReadBundle(args) => read_bundle(args).await,
         #[cfg(feature = "lzma")]
         Commands::ExtractBundle(args) => extract_bundle(args).await,
+        #[cfg(feature = "lzma")]
+        Commands::PackBundle(args) => pack_bundle(args).await,
     }
 }
 
@@ -359,8 +379,10 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), String> {
 async fn read_bundle(args: ReadBundleArgs) -> Result<(), String> {
     use std::time::Instant;
 
+    use ffbuildtool::bundle::AssetBundle;
+
     let start = Instant::now();
-    let (header, mut bundle) = ffbuildtool::bundle::AssetBundle::from_file(&args.bundle_path)?;
+    let (header, mut bundle) = AssetBundle::from_file(&args.input_bundle)?;
     println!("Bundle read in {}ms", start.elapsed().as_millis());
 
     if args.calculate_hashes {
@@ -380,14 +402,20 @@ async fn read_bundle(args: ReadBundleArgs) -> Result<(), String> {
 async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), String> {
     use std::{path::PathBuf, time::Instant};
 
+    use ffbuildtool::{bundle::AssetBundle, util};
+
     let start = Instant::now();
-    let (_, bundle) = ffbuildtool::bundle::AssetBundle::from_file(&args.bundle_path)?;
+    let (header, bundle) = AssetBundle::from_file(&args.input_bundle)?;
     println!("Bundle read in {}ms", start.elapsed().as_millis());
+    println!(
+        "------------------------\n{}\n------------------------\n{}",
+        header, bundle
+    );
 
     let output_dir = args.output_dir.unwrap_or({
-        let bundle_name = ffbuildtool::util::get_file_name_without_parent(&args.bundle_path);
-        let bundle_name_url_encoded = ffbuildtool::util::url_encode(bundle_name);
-        let bundle_path = PathBuf::from(&args.bundle_path);
+        let bundle_name = util::get_file_name_without_parent(&args.input_bundle);
+        let bundle_name_url_encoded = util::url_encode(bundle_name);
+        let bundle_path = PathBuf::from(&args.input_bundle);
         bundle_path
             .parent()
             .unwrap_or(&bundle_path)
@@ -395,11 +423,50 @@ async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), String> {
             .to_string_lossy()
             .to_string()
     });
-    println!("Extracting bundle {} to {}", args.bundle_path, output_dir);
+    println!("Extracting bundle {} to {}", args.input_bundle, output_dir);
 
     let start = Instant::now();
     bundle.extract_files(&output_dir)?;
     println!("Bundle extracted in {}ms", start.elapsed().as_millis());
+
+    Ok(())
+}
+
+#[cfg(feature = "lzma")]
+async fn pack_bundle(args: PackBundleArgs) -> Result<(), String> {
+    use std::{sync::LazyLock, time::Instant};
+
+    use ffbuildtool::bundle::AssetBundle;
+
+    fn cb(level_idx: usize, file: usize, total_files: usize, current_file_name: String) {
+        static PBS: OnceLock<Mutex<HashMap<usize, ProgressBar>>> = OnceLock::new();
+        static PB_TEMPLATE: LazyLock<ProgressStyle> = LazyLock::new(|| {
+            ProgressStyle::default_bar()
+                .template("{bar:40} {pos} / {len} {msg}")
+                .unwrap()
+        });
+
+        let mut pbs = PBS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap();
+        let pb = pbs.entry(level_idx).or_insert_with(|| {
+            let pb = ProgressBar::new(total_files as u64);
+            pb.set_style(PB_TEMPLATE.clone());
+            pb
+        });
+
+        pb.set_position(file as u64);
+        pb.set_message(current_file_name);
+    }
+
+    let start = Instant::now();
+    let bundle = AssetBundle::from_directory(&args.input_dir)?;
+    println!("Files read in {}ms", start.elapsed().as_millis());
+
+    let start = Instant::now();
+    bundle.to_file(&args.output_bundle, args.compression_level, Some(cb))?;
+    println!("Bundle created in {}ms", start.elapsed().as_millis());
 
     Ok(())
 }

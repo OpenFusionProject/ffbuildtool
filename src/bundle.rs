@@ -11,6 +11,9 @@ use lzma::{LzmaReader, LzmaWriter};
 
 use crate::{util, Error, FileInfo};
 
+// level index, file index, total files, file name
+pub type CompressionCallback = fn(usize, usize, usize, String);
+
 fn read_u32<T: Read>(reader: &mut T) -> Result<u32, Error> {
     let mut buf = [0; 4];
     reader.read_exact(&mut buf)?;
@@ -92,7 +95,12 @@ impl std::fmt::Display for AssetBundleHeader {
                 i, level.compressed_end, level.uncompressed_end
             )?;
         }
-        write!(f, "Bundle size: {}", self.bundle_size)
+        write!(
+            f,
+            "Bundle size: {} ({} bytes)",
+            util::bytes_to_human_readable(self.bundle_size),
+            self.bundle_size
+        )
     }
 }
 impl AssetBundleHeader {
@@ -292,7 +300,7 @@ impl std::fmt::Display for LevelFile {
                 f,
                 "{} - {} ({} bytes) - {}",
                 self.name,
-                util::bytes_to_human_readable(self.data.len() as u64),
+                util::bytes_to_human_readable(self.data.len() as u32),
                 self.data.len(),
                 hash
             ),
@@ -300,7 +308,7 @@ impl std::fmt::Display for LevelFile {
                 f,
                 "{} - {} ({} bytes)",
                 self.name,
-                util::bytes_to_human_readable(self.data.len() as u64),
+                util::bytes_to_human_readable(self.data.len() as u32),
                 self.data.len()
             ),
         }
@@ -336,15 +344,29 @@ impl Level {
         Ok(Self { files })
     }
 
-    fn write<W: Write>(&self, writer: &mut W, compression: u32) -> Result<usize, Error> {
+    fn write<W: Write>(
+        &self,
+        writer: &mut W,
+        compression: u32,
+        level_idx: usize,
+        callback: Option<CompressionCallback>,
+    ) -> Result<usize, Error> {
         let mut writer = Counter::new(LzmaWriter::new_compressor(writer, compression)?);
         let header = self.gen_header();
         header.write(&mut writer)?;
 
+        let num_files = header.files.len();
         for (idx, file) in header.files.iter().enumerate() {
             let padding_size = file.offset as usize - writer.writer_bytes();
             writer.write_all(&vec![0; padding_size])?;
             writer.write_all(&self.files[idx].data)?;
+            if let Some(callback) = callback {
+                callback(level_idx, idx, num_files, file.name.clone());
+            }
+        }
+
+        if let Some(callback) = callback {
+            callback(level_idx, num_files, num_files, "Done".to_string());
         }
 
         // pad to 4 bytes
@@ -442,14 +464,20 @@ impl AssetBundle {
         Ok((header, Self { levels }))
     }
 
-    fn write<W: Write>(&self, writer: &mut W, compression: u32) -> Result<(), Error> {
+    fn write<W: Write>(
+        &self,
+        writer: &mut W,
+        compression: u32,
+        callback: Option<CompressionCallback>,
+    ) -> Result<(), Error> {
         let mut buf = Vec::new();
         let mut buf_writer = Counter::new(&mut buf);
         let mut uncompressed_bytes_written = 0;
 
         let mut level_ends = Vec::new();
-        for level in &self.levels {
-            uncompressed_bytes_written += level.write(&mut buf_writer, compression)?;
+        for (idx, level) in self.levels.iter().enumerate() {
+            uncompressed_bytes_written +=
+                level.write(&mut buf_writer, compression, idx, callback)?;
             let uncompressed_end = uncompressed_bytes_written as u32;
             let compressed_end = buf_writer.writer_bytes() as u32;
             level_ends.push(LevelEnds {
@@ -492,11 +520,57 @@ impl AssetBundle {
             .map_err(|e| format!("Couldn't read bundle: {}", e))
     }
 
-    pub fn to_file(&self, path: &str, compression_level: u32) -> Result<(), String> {
+    pub fn from_directory(path: &str) -> Result<Self, String> {
+        // each subdirectory with the name `levelX` contains the files for that level.
+        // they must be in order-- starting from level0-- for their files to be included.
+        // all loose files get put at the end of level0.
+        let root_path = PathBuf::from(path);
+        if !root_path.is_dir() {
+            return Err(format!("Invalid root directory: {}", path));
+        }
+
+        let mut levels = Vec::new();
+        for i in 0.. {
+            let level_dir = root_path.join(format!("level{}", i));
+            if !level_dir.as_path().is_dir() {
+                break;
+            }
+
+            let Ok(files) = Self::get_level_files_from_dir(&level_dir) else {
+                return Err(format!(
+                    "Couldn't read files in dir: {}",
+                    level_dir.display()
+                ));
+            };
+
+            levels.push(Level { files });
+        }
+
+        let Ok(loose_files) = Self::get_level_files_from_dir(&root_path) else {
+            return Err(format!(
+                "Couldn't read files in dir: {}",
+                root_path.display()
+            ));
+        };
+        if levels.is_empty() {
+            levels.push(Level { files: loose_files });
+        } else {
+            levels[0].files.extend(loose_files);
+        }
+
+        Ok(Self { levels })
+    }
+
+    pub fn to_file(
+        &self,
+        path: &str,
+        compression_level: u32,
+        callback: Option<CompressionCallback>,
+    ) -> Result<(), String> {
         let file =
             File::create(path).map_err(|e| format!("Couldn't create file {}: {}", path, e))?;
         let mut writer = BufWriter::new(file);
-        self.write(&mut writer, compression_level)
+        self.write(&mut writer, compression_level, callback)
             .map_err(|e| format!("Couldn't write bundle: {}", e))?;
         writer
             .flush()
@@ -552,5 +626,12 @@ impl AssetBundle {
         }
 
         Ok(result)
+    }
+
+    pub fn get_num_files(&self, level: usize) -> Result<usize, Error> {
+        if level >= self.levels.len() {
+            return Err(format!("Level {} does not exist", level).into());
+        }
+        Ok(self.levels[level].files.len())
     }
 }
