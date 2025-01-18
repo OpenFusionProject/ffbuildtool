@@ -6,7 +6,7 @@ use std::{
 
 use clap::{Args, Parser, Subcommand};
 
-use ffbuildtool::{Error, ItemProgress, Version};
+use ffbuildtool::{ItemProgress, Version};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use uuid::Uuid;
 
@@ -199,10 +199,16 @@ impl ProgressManager {
     }
 }
 
+async fn parse_manifest(path: &str) -> Result<Version, String> {
+    Version::from_manifest(path)
+        .await
+        .map_err(|e| format!("Couldn't parse manifest: {}", e))
+}
+
 static PROGRESS: OnceLock<ProgressManager> = OnceLock::new();
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), String> {
     PROGRESS
         .set(ProgressManager::new())
         .unwrap_or_else(|_| panic!());
@@ -217,13 +223,13 @@ async fn main() -> Result<(), Error> {
     }
 }
 
-async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
+async fn generate_manifest(args: GenManifestArgs) -> Result<(), String> {
     println!(
         "Generating manifest for build at {} with asset URL {}",
         args.build_path, args.asset_url
     );
     let parent_uuid: Option<Uuid> = if let Some(p) = args.parent {
-        Some(Uuid::parse_str(p.as_str())?)
+        Some(Uuid::parse_str(p.as_str()).map_err(|_| "Invalid parent UUID".to_string())?)
     } else {
         None
     };
@@ -235,7 +241,8 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
         args.description.as_deref(),
         parent_uuid,
     )
-    .await?;
+    .await
+    .map_err(|e| format!("Couldn't generate bundle info: {}", e))?;
 
     if args.hidden {
         version.set_hidden(true);
@@ -243,13 +250,15 @@ async fn generate_manifest(args: GenManifestArgs) -> Result<(), Error> {
 
     println!("Build UUID: {}", version.get_uuid());
 
-    version.export_manifest(&args.output_path)?;
+    version
+        .export_manifest(&args.output_path)
+        .map_err(|e| format!("Couldn't export manifest: {}", e))?;
     println!("Manifest exported to {}", args.output_path);
     Ok(())
 }
 
-async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
-    let version = Version::from_manifest(&args.manifest_path).await?;
+async fn download_build(args: DownloadBuildArgs) -> Result<(), String> {
+    let version = parse_manifest(&args.manifest_path).await?;
     println!(
         "Downloading build {} to {}",
         version.get_uuid(),
@@ -262,13 +271,14 @@ async fn download_build(args: DownloadBuildArgs) -> Result<(), Error> {
 
     version
         .download_compressed(&args.output_path, Some(Arc::new(cb)))
-        .await?;
+        .await
+        .map_err(|e| format!("Couldn't download build: {}", e))?;
     println!("Download complete");
     Ok(())
 }
 
-async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
-    let version = Version::from_manifest(&args.manifest_path).await?;
+async fn repair_build(args: RepairBuildArgs) -> Result<(), String> {
+    let version = parse_manifest(&args.manifest_path).await?;
     println!(
         "Repairing build {} at {}",
         version.get_uuid(),
@@ -279,7 +289,10 @@ async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
         PROGRESS.get().unwrap().update_item(name, progress);
     };
 
-    let corrupted = version.repair(&args.build_path, Some(Arc::new(cb))).await?;
+    let corrupted = version
+        .repair(&args.build_path, Some(Arc::new(cb)))
+        .await
+        .map_err(|e| format!("Couldn't repair build: {}", e))?;
     if corrupted.is_empty() {
         println!("No corrupted files found");
     } else {
@@ -291,8 +304,8 @@ async fn repair_build(args: RepairBuildArgs) -> Result<(), Error> {
     Ok(())
 }
 
-async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
-    let version = Version::from_manifest(&args.manifest_path).await?;
+async fn validate_build(args: ValidateBuildArgs) -> Result<(), String> {
+    let version = parse_manifest(&args.manifest_path).await?;
     println!(
         "Validating build {} at {}",
         version.get_uuid(),
@@ -306,11 +319,13 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
     let corrupted = if args.uncompressed {
         version
             .validate_uncompressed(&args.build_path, None)
-            .await?
+            .await
+            .map_err(|e| format!("Couldn't validate uncompressed files: {}", e))?
     } else {
         version
             .validate_compressed(&args.build_path, Some(Arc::new(cb)))
-            .await?
+            .await
+            .map_err(|e| format!("Couldn't validate compressed files: {}", e))?
     };
 
     if corrupted.is_empty() {
@@ -325,7 +340,7 @@ async fn validate_build(args: ValidateBuildArgs) -> Result<(), Error> {
 }
 
 #[cfg(feature = "lzma")]
-async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), Error> {
+async fn extract_bundle(args: ExtractBundleArgs) -> Result<(), String> {
     use std::path::PathBuf;
 
     let asset_bundle = ffbuildtool::bundle::AssetBundle::from_file(&args.bundle_path)?;

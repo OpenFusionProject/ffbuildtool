@@ -357,9 +357,6 @@ impl AssetBundle {
             );
         }
 
-        #[cfg(debug_assertions)]
-        dbg!(&header);
-
         // seek to first level
         let offset = reader.reader_bytes();
         skip_exact(&mut reader, header.header_size as usize - offset)?;
@@ -376,9 +373,6 @@ impl AssetBundle {
                 )?;
             }
         }
-
-        #[cfg(debug_assertions)]
-        dbg!(&levels);
 
         Ok(Self { levels })
     }
@@ -405,18 +399,23 @@ impl AssetBundle {
         Ok(())
     }
 
-    pub fn from_file(path: &str) -> Result<Self, Error> {
-        let file = File::open(path)?;
-        let metadata = file.metadata()?;
+    pub fn from_file(path: &str) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| format!("Couldn't open file {}: {}", path, e))?;
+        let metadata = file.metadata().unwrap();
         let mut reader = BufReader::new(file);
         Self::read(&mut reader, metadata.len() as u32)
+            .map_err(|e| format!("Couldn't read bundle: {}", e))
     }
 
-    pub fn to_file(&self, path: &str) -> Result<(), Error> {
-        let file = File::create(path)?;
+    pub fn to_file(&self, path: &str) -> Result<(), String> {
+        let file =
+            File::create(path).map_err(|e| format!("Couldn't create file {}: {}", path, e))?;
         let mut writer = BufWriter::new(file);
-        self.write(&mut writer)?;
-        writer.flush()?;
+        self.write(&mut writer)
+            .map_err(|e| format!("Couldn't write bundle: {}", e))?;
+        writer
+            .flush()
+            .map_err(|e| format!("Couldn't finish writing bundle: {}", e))?;
         Ok(())
     }
 
@@ -438,7 +437,7 @@ impl AssetBundle {
         Ok(result)
     }
 
-    pub fn extract_files(&self, output_dir: &str) -> Result<(), Error> {
+    pub fn extract_files(&self, output_dir: &str) -> Result<(), String> {
         let make_subdirs = self.levels.len() > 1;
         for (i, level) in self.levels.iter().enumerate() {
             let level_dir = if make_subdirs {
@@ -446,12 +445,15 @@ impl AssetBundle {
             } else {
                 output_dir.to_string()
             };
-            util::create_dir_if_needed(&level_dir)?;
+            util::create_dir_if_needed(&level_dir)
+                .map_err(|e| format!("Couldn't create dir {}: {}", level_dir, e))?;
 
             let dir_path = Path::new(&level_dir);
             for file in &level.files {
                 let file_path = dir_path.join(&file.name);
-                std::fs::write(&file_path, &file.data)?;
+                std::fs::write(&file_path, &file.data).map_err(|e| {
+                    format!("Couldn't write file {}/{}: {}", level_dir, file.name, e)
+                })?;
             }
         }
         Ok(())
