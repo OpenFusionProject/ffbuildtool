@@ -17,6 +17,7 @@ clap = { version = "4.5.20", features = ["derive"], optional = true }
 indicatif = { version = "0.17.9", features = ["tokio", "improved_unicode"], optional = true }
 futures-util = "0.3.31"
 countio = { version = "0.2.19", optional = true }
+num_cpus = "1.16.0"
 
 [lib]
 name = "ffbuildtool"

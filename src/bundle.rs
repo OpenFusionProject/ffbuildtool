@@ -6,13 +6,38 @@ use std::{
 };
 
 use countio::Counter;
-use liblzma::{read::XzDecoder, write::XzEncoder};
+use liblzma::{
+    read::XzDecoder,
+    stream::{Check, Filters, LzmaOptions, MtStreamBuilder},
+    write::XzEncoder,
+};
 use log::*;
 
 use crate::{util, Error, FileInfo};
 
 // level index, file index, total files, file name
 pub type CompressionCallback = fn(usize, usize, usize, String);
+
+fn get_lzma_encoder<W: Write>(writer: &mut W, level: u32) -> Result<XzEncoder<&mut W>, Error> {
+    let mut options = LzmaOptions::new_preset(level)?;
+    options
+        .literal_context_bits(3)
+        .literal_position_bits(0)
+        .position_bits(2)
+        .dict_size(1 << 19);
+
+    let mut filters = Filters::new();
+    filters.lzma2(&options);
+
+    let stream = MtStreamBuilder::new()
+        .preset(level)
+        .check(Check::Crc64)
+        .threads(num_cpus::get() as u32)
+        .filters(filters)
+        .encoder()
+        .unwrap();
+    Ok(XzEncoder::new_stream(writer, stream))
+}
 
 fn read_u32<T: Read>(reader: &mut T) -> Result<u32, Error> {
     let mut buf = [0; 4];
@@ -351,7 +376,7 @@ impl Level {
         level_idx: usize,
         callback: Option<CompressionCallback>,
     ) -> Result<usize, Error> {
-        let mut writer = Counter::new(XzEncoder::new_parallel(writer, compression));
+        let mut writer = Counter::new(get_lzma_encoder(writer, compression)?);
         let header = self.gen_header();
         header.write(&mut writer)?;
 
