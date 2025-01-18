@@ -1,11 +1,6 @@
-use std::path::PathBuf;
-
 use uuid::Uuid;
 
-use crate::{
-    util::{self, TempDir},
-    Version,
-};
+use crate::{util::TempDir, Version};
 
 #[tokio::test]
 async fn test_validate_compressed_good() {
@@ -96,18 +91,12 @@ async fn test_extract_bundle() {
 
     let asset_bundle = crate::bundle::AssetBundle::from_file(bundle_path).unwrap();
     asset_bundle.extract_files(output_dir.path()).unwrap();
-    let output_files_dir =
-        PathBuf::from(output_dir.path()).join(util::url_encode("Map_00_00.unity3d"));
 
     let version = Version::from_manifest_file("example_manifest.json").unwrap();
     let bundle_info = version.get_bundle("Map_00_00.unity3d").unwrap();
 
     let corrupted = bundle_info
-        .validate_uncompressed(
-            output_files_dir.to_str().unwrap(),
-            Some(version.get_uuid()),
-            None,
-        )
+        .validate_uncompressed(output_dir.path(), Some(version.get_uuid()), None)
         .unwrap();
     assert!(corrupted.is_empty());
 }
