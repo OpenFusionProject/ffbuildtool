@@ -359,10 +359,11 @@ impl Level {
         for (idx, file) in header.files.iter().enumerate() {
             let padding_size = file.offset as usize - writer.writer_bytes();
             writer.write_all(&vec![0; padding_size])?;
-            writer.write_all(&self.files[idx].data)?;
+
             if let Some(callback) = callback {
                 callback(level_idx, idx, num_files, file.name.clone());
             }
+            writer.write_all(&self.files[idx].data)?;
         }
 
         if let Some(callback) = callback {
