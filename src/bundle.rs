@@ -8,7 +8,7 @@ use std::{
 use countio::Counter;
 use liblzma::{
     read::XzDecoder,
-    stream::{Check, Filters, LzmaOptions, MtStreamBuilder},
+    stream::{Check, Filters, LzmaOptions, MtStreamBuilder, Stream},
     write::XzEncoder,
 };
 use log::*;
@@ -37,6 +37,11 @@ fn get_lzma_encoder<W: Write>(writer: &mut W, level: u32) -> Result<XzEncoder<&m
         .encoder()
         .unwrap();
     Ok(XzEncoder::new_stream(writer, stream))
+}
+
+fn get_lzma_decoder<R: Read>(reader: &mut R) -> Result<XzDecoder<&mut R>, Error> {
+    let stream = Stream::new_auto_decoder(u64::MAX, 0)?;
+    Ok(XzDecoder::new_stream(reader, stream))
 }
 
 fn read_u32<T: Read>(reader: &mut T) -> Result<u32, Error> {
@@ -355,7 +360,7 @@ struct Level {
 }
 impl Level {
     fn read<R: Read + BufRead>(reader: &mut R) -> Result<Self, Error> {
-        let mut reader = Counter::new(BufReader::new(XzDecoder::new_parallel(reader)));
+        let mut reader = Counter::new(BufReader::new(get_lzma_decoder(reader)?));
         let header = LevelHeader::read(&mut reader)?;
 
         let mut files = Vec::with_capacity(header.num_files as usize);
