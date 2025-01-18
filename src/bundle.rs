@@ -302,7 +302,9 @@ impl Level {
         let padding_size = align(level_size, 4) - level_size;
         writer.write_all(&vec![0; padding_size])?;
 
-        Ok(writer.writer_bytes())
+        let total_written = writer.writer_bytes();
+        writer.into_inner().finish()?;
+        Ok(total_written)
     }
 
     fn gen_header(&self) -> LevelHeader {
