@@ -329,8 +329,8 @@ struct Level {
     files: Vec<LevelFile>,
 }
 impl Level {
-    fn read<R: Read>(reader: &mut R) -> Result<Self, Error> {
-        let mut reader = Counter::new(BufReader::new(XzDecoder::new(reader)));
+    fn read<R: Read + BufRead>(reader: &mut R) -> Result<Self, Error> {
+        let mut reader = Counter::new(BufReader::new(XzDecoder::new_parallel(reader)));
         let header = LevelHeader::read(&mut reader)?;
 
         let mut files = Vec::with_capacity(header.num_files as usize);
@@ -351,7 +351,7 @@ impl Level {
         level_idx: usize,
         callback: Option<CompressionCallback>,
     ) -> Result<usize, Error> {
-        let mut writer = Counter::new(XzEncoder::new(writer, compression));
+        let mut writer = Counter::new(XzEncoder::new_parallel(writer, compression));
         let header = self.gen_header();
         header.write(&mut writer)?;
 
