@@ -496,16 +496,37 @@ impl AssetBundle {
         let mut buf_writer = Counter::new(&mut buf);
         let mut uncompressed_bytes_written = 0;
 
-        let mut level_ends = Vec::new();
+        let mut level_sizes_uncompressed = Vec::with_capacity(self.levels.len());
+        let mut level_ends = Vec::with_capacity(self.levels.len());
         for (idx, level) in self.levels.iter().enumerate() {
-            uncompressed_bytes_written +=
-                level.write(&mut buf_writer, compression, idx, callback)?;
+            let level_size_uncompressed =
+                level.write(&mut buf_writer, compression, idx, callback)? as u64;
+            uncompressed_bytes_written += level_size_uncompressed;
+            level_sizes_uncompressed.push(level_size_uncompressed);
+
             let uncompressed_end = uncompressed_bytes_written as u32;
             let compressed_end = buf_writer.writer_bytes() as u32;
             level_ends.push(LevelEnds {
                 uncompressed_end,
                 compressed_end,
             });
+        }
+
+        // The LZMA_alone encoder does not write the correct
+        // buffer sizes to the headers, so sub them in.
+        for i in 0..self.levels.len() {
+            let level_start = if i == 0 {
+                0
+            } else {
+                level_ends[i - 1].compressed_end
+            };
+            let level_size_uncompressed = level_sizes_uncompressed[i];
+            let level_size_uncompressed_start = (level_start
+                + 1 // properties byte
+                + 4) // dict size
+                as usize;
+            buf[level_size_uncompressed_start..level_size_uncompressed_start + 8]
+                .copy_from_slice(&(level_size_uncompressed).to_le_bytes());
         }
 
         let header = AssetBundleHeader::new(level_ends);
