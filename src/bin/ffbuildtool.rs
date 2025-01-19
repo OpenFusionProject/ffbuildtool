@@ -135,7 +135,7 @@ struct PackBundleArgs {
     output_bundle: String,
 
     /// Compression level to use
-    #[clap(short = 'l', long, default_value = "6")]
+    #[clap(short = 'l', long, default_value = "4")]
     compression_level: u32,
 }
 
