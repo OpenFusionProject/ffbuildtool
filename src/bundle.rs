@@ -512,21 +512,24 @@ impl AssetBundle {
             });
         }
 
-        // The LZMA_alone encoder does not write the correct
-        // buffer sizes to the headers, so sub them in.
+        // The LZMA_alone encoder does not write the correct buffer sizes
+        // to the headers (it writes all 0xFFs), so sub them in.
         for i in 0..self.levels.len() {
             let level_start = if i == 0 {
                 0
             } else {
                 level_ends[i - 1].compressed_end
             };
+
             let level_size_uncompressed = level_sizes_uncompressed[i];
             let level_size_uncompressed_start = (level_start
                 + 1 // properties byte
                 + 4) // dict size
                 as usize;
-            buf[level_size_uncompressed_start..level_size_uncompressed_start + 8]
-                .copy_from_slice(&(level_size_uncompressed).to_le_bytes());
+
+            let slice = &mut buf[level_size_uncompressed_start..level_size_uncompressed_start + 8];
+            assert!(slice == [0xFF; 8]);
+            slice.copy_from_slice(&level_size_uncompressed.to_le_bytes());
         }
 
         let header = AssetBundleHeader::new(level_ends);
