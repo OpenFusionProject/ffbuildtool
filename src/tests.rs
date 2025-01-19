@@ -86,10 +86,12 @@ async fn test_generate_manifest() {
 #[cfg(feature = "lzma")]
 #[tokio::test]
 async fn test_extract_bundle() {
+    use crate::bundle::AssetBundle;
+
     let bundle_path = "example_builds/compressed/good/Map_00_00.unity3d";
     let output_dir = TempDir::new();
 
-    let (_, bundle) = crate::bundle::AssetBundle::from_file(bundle_path).unwrap();
+    let (_, bundle) = AssetBundle::from_file(bundle_path).unwrap();
     bundle.extract_files(output_dir.path()).unwrap();
 
     let version = Version::from_manifest_file("example_manifest.json").unwrap();
@@ -99,4 +101,32 @@ async fn test_extract_bundle() {
         .validate_uncompressed(output_dir.path(), Some(version.get_uuid()), None)
         .unwrap();
     assert!(corrupted.is_empty());
+}
+
+#[cfg(feature = "lzma")]
+#[tokio::test]
+async fn test_repack_bundle() {
+    use crate::bundle::AssetBundle;
+
+    let bundle_path = "example_builds/compressed/good/Map_00_00.unity3d";
+    let output_dir = TempDir::new();
+
+    let (_, og_bundle) = AssetBundle::from_file(bundle_path).unwrap();
+    og_bundle.extract_files(output_dir.path()).unwrap();
+
+    let repacked_bundle = AssetBundle::from_directory(output_dir.path()).unwrap();
+    assert!(og_bundle == repacked_bundle);
+}
+
+#[cfg(feature = "lzma")]
+#[tokio::test]
+async fn test_pack_bundle() {
+    use crate::bundle::AssetBundle;
+
+    let bundle_path = "example_builds/compressed/good/Map_00_00.unity3d";
+    let unpacked_path = "example_builds/uncompressed/good/map_5f00_5f00_2eunity3d";
+
+    let (_, og_bundle) = AssetBundle::from_file(bundle_path).unwrap();
+    let packed_bundle = AssetBundle::from_directory(unpacked_path).unwrap();
+    assert!(og_bundle == packed_bundle);
 }

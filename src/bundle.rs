@@ -73,7 +73,7 @@ fn align<T: Into<usize> + From<usize>>(value: T, alignment: T) -> T {
     aligned.into()
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct LevelEnds {
     compressed_end: u32,
     uncompressed_end: u32,
@@ -85,7 +85,7 @@ const EXPECTED_PLAYER_VERSION: &str = "fusion-2.x.x";
 const EXPECTED_ENGINE_VERSION_BASE: &str = "2";
 const DEFAULT_ENGINE_VERSION: &str = "2.5.4b5";
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AssetBundleHeader {
     signature: String,
     stream_version: u32,
@@ -335,6 +335,12 @@ impl std::fmt::Display for LevelFile {
         }
     }
 }
+impl PartialEq for LevelFile {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.data == other.data
+    }
+}
+impl Eq for LevelFile {}
 impl LevelFile {
     fn new(name: String, data: Vec<u8>) -> Self {
         Self {
@@ -349,6 +355,19 @@ impl LevelFile {
 struct Level {
     files: Vec<LevelFile>,
 }
+impl PartialEq for Level {
+    fn eq(&self, other: &Self) -> bool {
+        // Files may be out of order, that's fine
+        for file in &self.files {
+            let other_file = other.files.iter().find(|f| f.name == file.name);
+            if other_file.is_none_or(|f| f.data != file.data) {
+                return false;
+            }
+        }
+        true
+    }
+}
+impl Eq for Level {}
 impl Level {
     fn read<R: Read + BufRead>(reader: &mut R) -> Result<Self, Error> {
         let mut reader = Counter::new(BufReader::new(get_lzma_decoder(reader)?));
@@ -435,7 +454,7 @@ impl Level {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AssetBundle {
     levels: Vec<Level>,
 }
