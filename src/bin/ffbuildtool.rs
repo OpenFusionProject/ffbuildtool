@@ -159,8 +159,9 @@ impl ProgressManager {
             max_bars: 10,
             styles: vec![
                 ProgressStyle::default_bar()
-                    .template("[{bar:40.cyan/blue}] {bytes} / {total_bytes} ({eta}) {wide_msg:>}")
-                    .unwrap(),
+                    .template("[{bar:40}] {bytes} / {total_bytes} ({eta}) {wide_msg:>}")
+                    .unwrap()
+                    .progress_chars("=> "),
                 ProgressStyle::default_spinner()
                     .template("{spinner:.green} Validating {wide_msg:>}")
                     .unwrap(),
@@ -442,8 +443,9 @@ async fn pack_bundle(args: PackBundleArgs) -> Result<(), String> {
         static PBS: OnceLock<Mutex<HashMap<usize, ProgressBar>>> = OnceLock::new();
         static PB_TEMPLATE: LazyLock<ProgressStyle> = LazyLock::new(|| {
             ProgressStyle::default_bar()
-                .template("{bar:40} {pos} / {len} {msg}")
+                .template("[{bar:40}] {pos} / {len} {msg}")
                 .unwrap()
+                .progress_chars("=> ")
         });
 
         let mut pbs = PBS
