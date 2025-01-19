@@ -8,7 +8,7 @@ use std::{
 use countio::Counter;
 use liblzma::{
     read::XzDecoder,
-    stream::{Check, Filters, LzmaOptions, MtStreamBuilder, Stream},
+    stream::{LzmaOptions, Stream},
     write::XzEncoder,
 };
 use log::*;
@@ -24,23 +24,14 @@ fn get_lzma_encoder<W: Write>(writer: &mut W, level: u32) -> Result<XzEncoder<&m
         .literal_context_bits(3)
         .literal_position_bits(0)
         .position_bits(2)
-        .dict_size(1 << 19);
+        .dict_size(1 << 23);
 
-    let mut filters = Filters::new();
-    filters.lzma2(&options);
-
-    let stream = MtStreamBuilder::new()
-        .preset(level)
-        .check(Check::Crc64)
-        .threads(num_cpus::get() as u32)
-        .filters(filters)
-        .encoder()
-        .unwrap();
+    let stream = Stream::new_lzma_encoder(&options)?;
     Ok(XzEncoder::new_stream(writer, stream))
 }
 
 fn get_lzma_decoder<R: Read>(reader: &mut R) -> Result<XzDecoder<&mut R>, Error> {
-    let stream = Stream::new_auto_decoder(u64::MAX, 0)?;
+    let stream = Stream::new_lzma_decoder(u64::MAX)?;
     Ok(XzDecoder::new_stream(reader, stream))
 }
 
