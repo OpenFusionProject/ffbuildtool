@@ -204,6 +204,11 @@ impl Version {
         url
     }
 
+    /// Returns the main file URL for the build.
+    pub fn get_main_file_url(&self) -> Option<String> {
+        self.main_file_url.clone()
+    }
+
     /// Marks the build as hidden or unhidden. What this means is up to the client code;
     /// in OpenFusionLauncher, it will hide the build from the list of available builds.
     pub fn set_hidden(&mut self, hidden: bool) {
@@ -217,6 +222,11 @@ impl Version {
     /// Overrides the asset URL for the build. Useful for testing.
     pub fn set_asset_url(&mut self, asset_url: &str) {
         self.asset_url = asset_url.to_string();
+    }
+
+    /// Overrides the main file URL for the build. Useful for testing.
+    pub fn set_main_file_url(&mut self, main_file_url: &str) {
+        self.main_file_url = Some(main_file_url.to_string());
     }
 
     /// Loads the `Version` metadata from a JSON manifest file path or URL.
