@@ -3,6 +3,7 @@ name = "ffbuildtool"
 version = "5.1.0"
 authors = ["OpenFusion Contributors"]
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 log = "0.4.22"
