@@ -353,10 +353,14 @@ impl Version {
             info!("Checking main file");
             let main_bundle_info: BundleInfo = main_file_info.into();
             let main_file_path = get_path("main.unity3d");
-            let main_file_url = match download_failed_bundles {
-                false => None,
-                true => Some(format!("{}/main.unity3d", self.get_asset_url())),
+            let main_file_url = if download_failed_bundles {
+                let fallback_url = format!("{}/main.unity3d", self.get_asset_url());
+                let url = self.get_main_file_url().unwrap_or(fallback_url);
+                Some(url)
+            } else {
+                None
             };
+
             if main_bundle_info
                 .validate_compressed(
                     &main_file_path,
