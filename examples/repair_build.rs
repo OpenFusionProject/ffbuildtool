@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use ffbuildtool::{
-    util::{self, TempDir},
     Version,
+    util::{self, TempDir},
 };
 
 use log::*;

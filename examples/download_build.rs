@@ -1,6 +1,6 @@
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
 
 use ffbuildtool::{ItemProgress, Version};
@@ -22,10 +22,9 @@ async fn main() {
             bytes_downloaded,
             total_bytes,
         } = progress
+            && bytes_downloaded == total_bytes
         {
-            if bytes_downloaded == total_bytes {
-                total_download_size_cb.fetch_add(bytes_downloaded, Ordering::AcqRel);
-            }
+            total_download_size_cb.fetch_add(bytes_downloaded, Ordering::AcqRel);
         }
     };
 

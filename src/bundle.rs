@@ -13,7 +13,7 @@ use liblzma::{
 };
 use log::*;
 
-use crate::{util, Error, FileInfo};
+use crate::{Error, FileInfo, util};
 
 // level index, file index, total files, file name
 pub type CompressionCallback = fn(usize, usize, usize, String);

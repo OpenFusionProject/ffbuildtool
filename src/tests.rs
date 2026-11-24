@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::{util::TempDir, Version};
+use crate::{Version, util::TempDir};
 
 #[tokio::test]
 async fn test_validate_compressed_good() {

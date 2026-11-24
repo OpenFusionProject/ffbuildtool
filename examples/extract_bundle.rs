@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use ffbuildtool::{bundle::AssetBundle, util, Version};
+use ffbuildtool::{Version, bundle::AssetBundle, util};
 
 use log::*;
 
