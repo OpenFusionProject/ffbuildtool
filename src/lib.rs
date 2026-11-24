@@ -497,11 +497,10 @@ impl Version {
                     None
                 };
 
-                match bundle_info.validate_uncompressed(
-                    folder_path.to_str().unwrap(),
-                    Some(uuid),
-                    cb,
-                ) {
+                match bundle_info
+                    .validate_uncompressed(folder_path.to_str().unwrap(), Some(uuid), cb)
+                    .await
+                {
                     Ok(corrupted_files) => {
                         if !corrupted_files.is_empty() {
                             for (file_name, e) in &corrupted_files {
@@ -625,7 +624,7 @@ impl BundleInfo {
     ) -> Result<bool, Error> {
         const MAX_DOWNLOAD_ATTEMPTS: usize = 5;
         let file_name = util::get_file_name_without_parent(file_path);
-        let mut file_info = FileInfo::build_file(file_path);
+        let mut file_info = FileInfo::build_file(file_path).await;
         let mut attempts = 0;
         while let Err(fail_reason) = {
             if let Some(ref cb) = callback {
@@ -674,7 +673,7 @@ impl BundleInfo {
             {
                 warn!("Failed to download {}: {}", file_path, e);
             } else {
-                file_info = FileInfo::build_file(file_path);
+                file_info = FileInfo::build_file(file_path).await;
             }
             attempts += 1;
         }
@@ -692,7 +691,7 @@ impl BundleInfo {
         Ok(attempts > 0)
     }
 
-    pub fn validate_uncompressed(
+    pub async fn validate_uncompressed(
         &self,
         folder_path: &str,
         version_uuid: Option<Uuid>,
@@ -703,7 +702,7 @@ impl BundleInfo {
         let mut corrupted = Vec::new();
         for (file_name, file_info_good) in &self.uncompressed_info {
             let file_path = PathBuf::from(folder_path).join(file_name);
-            let file_info = FileInfo::build_file(file_path.to_str().unwrap());
+            let file_info = FileInfo::build_file(file_path.to_str().unwrap()).await;
             let file_id = format!("{}/{}", folder_path_leaf, file_name);
 
             if let Some(ref cb) = callback {
@@ -740,24 +739,30 @@ impl FileInfo {
         if uri.starts_with("http") {
             Self::build_http(uri).await
         } else {
-            Ok(Self::build_file(uri))
+            Ok(Self::build_file(uri).await)
         }
     }
 
     async fn build_http(url: &str) -> Result<Self, Error> {
         info!("Fetching {}", url);
         let temp_file = TempFile::download(url).await?;
-        Ok(Self::build_file(temp_file.path()))
+        Ok(Self::build_file(temp_file.path()).await)
     }
 
-    fn build_file(file_path: &str) -> Self {
-        let build_file_internal = || -> Result<Self, Error> {
-            let hash = util::get_file_hash(file_path)?;
+    async fn build_file(file_path: &str) -> Self {
+        let file_path = file_path.to_string();
+        let build_file_internal = move || -> Result<Self, Error> {
+            let hash = util::get_file_hash(&file_path)?;
             let size = std::fs::metadata(file_path)?.len();
             Ok(Self { hash, size })
         };
-        // if we can't access the file, assume it's corrupt
-        build_file_internal().unwrap_or_default()
+
+        tokio::task::spawn_blocking(|| {
+            // if we can't access the file, assume it's corrupt
+            build_file_internal().unwrap_or_default()
+        })
+        .await
+        .unwrap()
     }
 
     fn validate(&self, good: &Self) -> Result<(), FailReason> {

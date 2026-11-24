@@ -99,6 +99,7 @@ async fn test_extract_bundle() {
 
     let corrupted = bundle_info
         .validate_uncompressed(output_dir.path(), Some(version.get_uuid()), None)
+        .await
         .unwrap();
     assert!(corrupted.is_empty());
 }
